@@ -41,3 +41,20 @@
 /doc/html
 /doc/man
 /doc/xml
+
+# Autotools output
+/Makefile.in
+/aclocal.m4
+/autom4te.cache/
+/bin/Makefile.in
+/compile
+/config.guess
+/config.h.in~
+/config.sub
+/configure
+/depcomp
+/install-sh
+/ltmain.sh
+/man/Makefile.in
+/missing
+/test-driver
