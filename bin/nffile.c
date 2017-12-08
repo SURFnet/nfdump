@@ -76,10 +76,7 @@ char 	*CurrentIdent;
 
 // LZO params
 #define LZO_BUFFSIZE  ((BUFFSIZE + BUFFSIZE / 16 + 64 + 3) + sizeof(data_block_header_t))
-#define HEAP_ALLOC(var,size) \
-    lzo_align_t __LZO_MMODEL var [ ((size) + (sizeof(lzo_align_t) - 1)) / sizeof(lzo_align_t) ]
 
-static HEAP_ALLOC(wrkmem,LZO1X_1_MEM_COMPRESS);
 static void *lzo_buff, *bz2_buff;
 static int lzo_initialized = 0;
 static int bz2_initialized = 0;
@@ -143,10 +140,10 @@ void SumStatRecords(stat_record_t *s1, stat_record_t *s2) {
 static int LZO_initialize(void) {
 
 	if (lzo_init() != LZO_E_OK) {
-			// this usually indicates a compiler bug - try recompiling 
-			// without optimizations, and enable `-DLZO_DEBUG' for diagnostics
-			LogError("Compression lzo_init() failed.\n");
-			return 0;
+		// this usually indicates a compiler bug - try recompiling 
+		// without optimizations, and enable `-DLZO_DEBUG' for diagnostics
+		LogError("Compression lzo_init() failed.\n");
+		return 0;
 	} 
 	lzo_buff = malloc(BUFFSIZE+ sizeof(data_block_header_t));
 	if ( !lzo_buff ) {
@@ -967,6 +964,10 @@ void 	*read_ptr, *buff;
 
 } // End of ReadBlock
 
+
+int CompressLzo(nffile_t *nffile) {
+}
+
 int WriteBlock(nffile_t *nffile) {
 data_block_header_t *out_block_header;
 int r, ret;
@@ -981,6 +982,8 @@ lzo_uint out_len;
 
 	if ( FILE_IS_LZO_COMPRESSED(nffile) ) {
 
+        lzo_voidp wrkmem = malloc(LZO1X_1_MEM_COMPRESS);
+
 		out_block_header = (data_block_header_t *)lzo_buff;
 		*out_block_header = *(nffile->block_header);
 
@@ -988,6 +991,8 @@ lzo_uint out_len;
 		out = (unsigned char __LZO_MMODEL *)((pointer_addr_t)out_block_header + sizeof(data_block_header_t));	
 		in_len = nffile->block_header->size;
 		r = lzo1x_1_compress(in,in_len,out,&out_len,wrkmem);
+
+        free(wrkmem);
 
 		if (r != LZO_E_OK) {
 			snprintf(error_string, ERR_SIZE,"compression failed: %d" , r);
@@ -1076,7 +1081,10 @@ lzo_uint out_len;
 		in  = (unsigned char __LZO_MMODEL *)((pointer_addr_t)block_header     + sizeof(data_block_header_t));	
 		out = (unsigned char __LZO_MMODEL *)((pointer_addr_t)out_block_header + sizeof(data_block_header_t));	
 		in_len = block_header->size;
+        
+        lzo_voidp wrkmem = malloc(LZO1X_1_MEM_COMPRESS);
 		r = lzo1x_1_compress(in,in_len,out,&out_len,wrkmem);
+        free(wrkmem);
 	
 		if (r != LZO_E_OK) {
 			snprintf(error_string, ERR_SIZE,"compression failed: %d" , r);

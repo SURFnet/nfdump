@@ -96,14 +96,17 @@ typedef struct file_header_s {
 
 	uint16_t	version;			// version of binary file layout, incl. magic
 #define LAYOUT_VERSION_1	1
+#define LAYOUT_VERSION_2	2
 
 	uint32_t	flags;				
 #define NUM_FLAGS		4
-#define FLAG_NOT_COMPRESSED	0x0		// records are not compressed
-#define FLAG_LZO_COMPRESSED	0x1		// records are LZO compressed
-#define FLAG_ANONYMIZED 	0x2		// flow data are anonimized 
-#define FLAG_CATALOG		0x4		// has a file catalog record after stat record
-#define FLAG_BZ2_COMPRESSED 0x8		// records are BZ2 compressed
+#define FLAG_NOT_COMPRESSED	 0x0	// records are not compressed
+#define FLAG_LZO_COMPRESSED	 0x1	// records are LZO compressed
+#define FLAG_ANONYMIZED 	 0x2    // flow data are anonimized 
+#define FLAG_CATALOG		 0x4    // has a file catalog record after stat record
+#define FLAG_BZ2_COMPRESSED  0x8	// records are BZ2 compressed
+#define FLAG_LZ4_COMPRESSED  0x10   // records are LZ4 compressed (LAYOUT_VERSION_2)
+#define FLAG_LZMA_COMPRESSED 0x20   // records are LZMA compressed (LAYOUT_VERSION_2)
 							
 	uint32_t	NumBlocks;			// number of data blocks in file
 	char		ident[IDENTLEN];	// string identifier for this file
@@ -236,7 +239,7 @@ typedef struct nffile_s {
 	void				*buff_ptr;		// pointer into buffer for read/write blocks/records
 	stat_record_t 		*stat_record;	// flow stat record
 	catalog_t			*catalog;		// file catalog
-	int					_compress;		// data compressed flag
+	int					_compress;		// data compressed flag (NOT USED). See file_header_t.flags instead
 	int					fd;				// file descriptor
 } nffile_t;
 
