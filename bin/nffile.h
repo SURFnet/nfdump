@@ -2195,6 +2195,9 @@ int CloseUpdateFile(nffile_t *nffile, char *ident);
 
 int ReadBlock(nffile_t *nffile);
 
+int CompressLzo(data_block_header_t *in_block, data_block_header_t **out_block);
+int CompressBz2(data_block_header_t *in_block, data_block_header_t **out_block);
+
 int WriteBlock(nffile_t *nffile);
 
 int WriteExtraBlock(nffile_t *nffile, data_block_header_t *block_header);

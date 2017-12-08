@@ -76,6 +76,7 @@ char 	*CurrentIdent;
 
 // LZO params
 #define LZO_BUFFSIZE(size)  (((size) + (size) / 16 + 64 + 3) + sizeof(data_block_header_t))
+#define BZ2_BUFFSIZE(size)  ((101 * (size)) / 100 + 600 + sizeof(data_block_header_t))
 
 static void *lzo_buff, *bz2_buff;
 static int lzo_initialized = 0;
@@ -974,17 +975,17 @@ int ret;
 
 	in_len = (lzo_uint)in_block->size;
 	*out_block = (data_block_header_t *)malloc(LZO_BUFFSIZE(in_len));
+	// Copy the header
 	**out_block = *in_block;
 
 	in = (lzo_bytep)((pointer_addr_t)in_block + sizeof(data_block_header_t));	
 	out = (lzo_bytep)((pointer_addr_t)out_block + sizeof(data_block_header_t));	
 
-	static lzo_voidp wrkmem = malloc(LZO1X_1_MEM_COMPRESS);
+	lzo_voidp wrkmem = (lzo_voidp*)malloc(LZO1X_1_MEM_COMPRESS);
 
 	ret = lzo1x_1_compress(in, in_len, out, &out_len, wrkmem);
 
-	// Only free when wrkmem is non static (in the future)
-	//free(wrkmem);
+	free(wrkmem);
 
 	if (ret != LZO_E_OK) {
         free(*out_block);
@@ -993,13 +994,52 @@ int ret;
 		error_string[ERR_SIZE-1] = 0;
 		return -2;
 	}
-    (*outblock)->size = out_len;
+    (*out_block)->size = out_len;
     return 0;
+}
+
+int CompressBz2(data_block_header_t *in_block, data_block_header_t **out_block) {
+lzo_uint in_len;
+lzo_uint out_len;
+int ret;
+
+	in_len = in_block->size;
+	out_len = BZ2_BUFFSIZE(in_len);
+	*out_block = (data_block_header_t *)malloc(out_len);
+	// Copy the header
+	**out_block = *in_block;
+
+	bz_stream bs;
+	BZ2_prep_stream (&bs);
+	BZ2_bzCompressInit (&bs, 9, 0, 0);
+
+	bs.next_in = (char*) ( (pointer_addr_t) in_block  + sizeof (data_block_header_t));
+	bs.next_out = (char*) ( (pointer_addr_t) out_block + sizeof (data_block_header_t));
+	bs.avail_in = in_len;
+	bs.avail_out = out_len;
+
+	for (;;) {
+		int r = BZ2_bzCompress (&bs, BZ_FINISH);
+		if (r == BZ_FINISH_OK) continue;
+		if (r != BZ_STREAM_END) {
+			free(*out_block);
+			*out_block = NULL;
+			snprintf (error_string, ERR_SIZE, "bz2 compression failed: %d" , r);
+			error_string[ERR_SIZE - 1] = 0;
+			BZ2_bzCompressEnd (&bs);
+			return -2;
+		}
+		break;
+	}
+
+	(*out_block)->size = bs.total_out_lo32;
+	BZ2_bzCompressEnd (&bs);
+	return 0;
 }
 
 int WriteBlock(nffile_t *nffile) {
 data_block_header_t *out_block_header;
-int ret;
+int ret = 0;
 
 	// empty blocks need not to be stored 
 	if ( nffile->block_header->size == 0 )
@@ -1008,41 +1048,16 @@ int ret;
 	if ( FILE_IS_LZO_COMPRESSED(nffile) ) {
 		ret = CompressLzo(nffile->block_header, &out_block_header);
 	}
-
 	else if ( FILE_IS_BZ2_COMPRESSED(nffile) ) {
- 
-		out_block_header = (data_block_header_t *) bz2_buff;
-		*out_block_header = * (nffile->block_header);
-
-		bz_stream bs;
-		BZ2_prep_stream (&bs);
-		BZ2_bzCompressInit (&bs, 9, 0, 0);
- 
-		bs.next_in = (char*) ( (pointer_addr_t) nffile->block_header + sizeof (data_block_header_t));
-		bs.next_out = (char*) ( (pointer_addr_t) out_block_header + sizeof (data_block_header_t));
-		bs.avail_in = nffile->block_header->size;
-		bs.avail_out = BUFFSIZE;
- 
-		for (;;) {
-			int r = BZ2_bzCompress (&bs, BZ_FINISH);
-			if (r == BZ_FINISH_OK) continue;
-			if (r != BZ_STREAM_END) {
-				snprintf (error_string, ERR_SIZE, "bz2 compression failed: %d" , r);
-				error_string[ERR_SIZE - 1] = 0;
-				BZ2_bzCompressEnd (&bs);
-				return -2;
-			}
-			break;
-		}
- 
-		out_block_header->size = bs.total_out_lo32;
-		BZ2_bzCompressEnd (&bs);
- 
+		ret = CompressBz2(nffile->block_header, &out_block_header);
 	}
-
 	else {
 		// not compressed
 		out_block_header = nffile->block_header;
+	}
+
+	if (ret < 0) {
+		return ret;
 	}
 
 	ret = write (nffile->fd, (void *) out_block_header, sizeof (data_block_header_t) + out_block_header->size);
@@ -1087,11 +1102,6 @@ lzo_uint out_len;
 			return -2;
 		}
 	
-		out_block_header->size = out_len;
-		ret =  write(nffile->fd, (void *)out_block_header, sizeof(data_block_header_t) + out_block_header->size);
-		if ( ret > 0 ) {
-			nffile->file_header->NumBlocks++;
-		}
 	
 		return ret;
 	}
@@ -1132,8 +1142,7 @@ lzo_uint out_len;
 		return ret;
 	}
 
-	// not compressed or catalog
-	ret =  write(nffile->fd, (void *)block_header, sizeof(data_block_header_t) + block_header->size);
+	ret =  write(nffile->fd, (void *)out_block_header, sizeof(data_block_header_t) + out_block_header->size);
 	if ( ret > 0 ) {
 		nffile->file_header->NumBlocks++;
 	}
