@@ -1085,67 +1085,24 @@ lzo_uint out_len;
 
 
 	if ( FILE_IS_LZO_COMPRESSED(nffile) && block_header->id != CATALOG_BLOCK) {
-		out_block_header = (data_block_header_t *)lzo_buff;
-		*out_block_header = *(block_header);
-	
-		in  = (unsigned char __LZO_MMODEL *)((pointer_addr_t)block_header     + sizeof(data_block_header_t));	
-		out = (unsigned char __LZO_MMODEL *)((pointer_addr_t)out_block_header + sizeof(data_block_header_t));	
-		in_len = block_header->size;
-		
-		lzo_voidp wrkmem = malloc(LZO1X_1_MEM_COMPRESS);
-		r = lzo1x_1_compress(in,in_len,out,&out_len,wrkmem);
-		free(wrkmem);
-	
-		if (r != LZO_E_OK) {
-			snprintf(error_string, ERR_SIZE,"compression failed: %d" , r);
-			error_string[ERR_SIZE-1] = 0;
-			return -2;
-		}
-	
-	
-		return ret;
+		ret = CompressLzo(block_header, &out_block_header);
 	}
-
-	if ( FILE_IS_BZ2_COMPRESSED(nffile) && block_header->id != CATALOG_BLOCK) {
-		bz_stream bs;
-		BZ2_prep_stream (&bs);
-		BZ2_bzCompressInit (&bs, 9, 0, 0);
-
-		out_block_header = (data_block_header_t *)bz2_buff;
-		*out_block_header = *(block_header);
- 
-		bs.next_in = (char*) ( (pointer_addr_t) block_header + sizeof (data_block_header_t));
-		bs.next_out = (char*) ( (pointer_addr_t) out_block_header + sizeof (data_block_header_t));
-		bs.avail_in = block_header->size;
-		bs.avail_out = BUFFSIZE;
- 
-		for (;;) {
-			int r = BZ2_bzCompress (&bs, BZ_FINISH);
-			if (r == BZ_FINISH_OK) continue;
-			if (r != BZ_STREAM_END) {
-				snprintf (error_string, ERR_SIZE, "bz2 compression failed: %d" , r);
-				error_string[ERR_SIZE - 1] = 0;
-				BZ2_bzCompressEnd (&bs);
-				return -2;
-			}
-			break;
-		}
- 
-		out_block_header->size = bs.total_out_lo32;
-		BZ2_bzCompressEnd (&bs);
- 
-		ret = write (nffile->fd, (void *) out_block_header, sizeof (data_block_header_t) + out_block_header->size);
-		if (ret > 0) {
-			nffile->file_header->NumBlocks++;
-		}
-
-		return ret;
+	else if ( FILE_IS_BZ2_COMPRESSED(nffile) && block_header->id != CATALOG_BLOCK) {
+		ret = CompressBz2(block_header, &out_block_header);
+	}
+	else {
+		// not compressed or catalog block
+		out_block_header = block_header;
 	}
 
 	ret =  write(nffile->fd, (void *)out_block_header, sizeof(data_block_header_t) + out_block_header->size);
 	if ( ret > 0 ) {
 		nffile->file_header->NumBlocks++;
 	}
+
+	if (out_block_header != block_header)
+		free(out_block_header);
+
 	return ret;
 
 } // End of WriteExtraBlock
