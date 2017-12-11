@@ -1,4 +1,4 @@
-/*
+/*  vi: noexpandtab tabstop=4 shiftwidth=4
  *  Copyright (c) 2014, Peter Haag
  *  Copyright (c) 2009, Peter Haag
  *  Copyright (c) 2008, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
@@ -2136,26 +2136,26 @@ typedef struct type_mask_s {
  */
  
 typedef struct common_record_v1_s {
-    // the head of each data record
-    uint32_t    flags;
-    uint16_t    size;
-    uint16_t    exporter_ref;
-    uint16_t    msec_first;
-    uint16_t    msec_last;
-    uint32_t    first;
-    uint32_t    last;
+	// the head of each data record
+	uint32_t    flags;
+	uint16_t    size;
+	uint16_t    exporter_ref;
+	uint16_t    msec_first;
+	uint16_t    msec_last;
+	uint32_t    first;
+	uint32_t    last;
 
-    uint8_t     dir;
-    uint8_t     tcp_flags;
-    uint8_t     prot;
-    uint8_t     tos;
-    uint16_t    input;
-    uint16_t    output;
-    uint16_t    srcport;
-    uint16_t    dstport;
-    uint16_t    srcas;
-    uint16_t    dstas;
-    uint8_t     data[4];    // .. more data below
+	uint8_t     dir;
+	uint8_t     tcp_flags;
+	uint8_t     prot;
+	uint8_t     tos;
+	uint16_t    input;
+	uint16_t    output;
+	uint16_t    srcport;
+	uint16_t    dstport;
+	uint16_t    srcas;
+	uint16_t    dstas;
+	uint8_t     data[4];    // .. more data below
 } common_record_v1_t;
 
 #endif
@@ -2193,10 +2193,14 @@ void CloseFile(nffile_t *nffile);
 
 int CloseUpdateFile(nffile_t *nffile, char *ident);
 
+ssize_t ReadBlockData(nffile_t *nffile, data_block_header_t **block);
+ssize_t DecompressBlock(nffile_t *nffile, data_block_header_t **block);
 int ReadBlock(nffile_t *nffile);
 
 int CompressLzo(data_block_header_t *in_block, data_block_header_t **out_block);
 int CompressBz2(data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressLzo(data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressBz2(data_block_header_t *in_block, data_block_header_t **out_block);
 
 int WriteBlock(nffile_t *nffile);
 

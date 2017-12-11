@@ -803,27 +803,100 @@ int CloseUpdateFile(nffile_t *nffile, char *ident) {
 
 } /* End of CloseUpdateFile */
 
-int ReadBlock(nffile_t *nffile) {
-ssize_t ret, read_bytes, buff_bytes, request_size;
-void 	*read_ptr, *buff;
+
+ssize_t DecompressLzo(data_block_header_t *in_block, data_block_header_t **out_block) {
+int ret;
+	lzo_uint new_len = sizeof(data_block_header_t) + BUFFSIZE;
+	// Allocate space for decompressed data
+	*out_block = (data_block_header_t*)malloc(new_len);
+	if (*out_block == NULL) {
+		LogError("Failed to allocate LZO decompression buffer");
+		return NF_ERROR;
+	}
+	// Copy block header
+	**out_block = *in_block;
+
+	// Point to start of block data
+	lzo_bytep in_data = (lzo_bytep)in_block + sizeof(data_block_header_t);
+	lzo_bytep out_data = (lzo_bytep)*out_block + sizeof(data_block_header_t);
+	lzo_uint out_size = BUFFSIZE;
+
+	ret = lzo1x_decompress(in_data, in_block->size, out_data, &out_size, NULL);
+	if (ret != LZO_E_OK ) {
+		LogError("ReadBlock() error decompression failed in %s line %d: LZO error: %d\n", __FILE__, __LINE__, ret);
+		return NF_CORRUPT;
+	}
+	(*out_block)->size = out_size;
+	return out_size + sizeof(data_block_header_t);
+}
+
+
+ssize_t DecompressBz2(data_block_header_t *in_block, data_block_header_t **out_block) {
+bz_stream bs;
+BZ2_prep_stream (&bs);
+	ssize_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
+	// Allocate space for decompressed data
+	*out_block = (data_block_header_t*)malloc(new_len);
+	if (*out_block == NULL) {
+		LogError("Failed to allocate BZ2 decompression buffer");
+		return NF_ERROR;
+	}
+	// Copy block header
+	**out_block = *in_block;
+
+	BZ2_bzDecompressInit (&bs, 0, 0);
+	bs.next_in = (char*)in_block + sizeof(data_block_header_t);
+	bs.avail_in = in_block->size;
+	bs.next_out = (char*)*out_block + sizeof(data_block_header_t);
+	bs.avail_out = BUFFSIZE;
+	for (;;) {
+		int r = BZ2_bzDecompress (&bs);
+		if (r == BZ_OK) {
+			continue;
+		} else if (r != BZ_STREAM_END) {
+			BZ2_bzDecompressEnd (&bs);
+			return NF_CORRUPT;
+		} else {
+			break;
+		}
+	}
+	(*out_block)->size = bs.total_out_lo32;
+	BZ2_bzDecompressEnd (&bs);
+	return (*out_block)->size + sizeof(data_block_header_t);
+}
+
+
+ssize_t ReadBlockData(nffile_t *nffile, data_block_header_t **block) {
+ssize_t ret, buff_size, request_size;
+void 	*read_ptr, *buff, *header;
+
+    header = malloc(sizeof(data_block_header_t));
+
+	if (header == NULL) {
+		LogError("Failed to allocate memory for block header");
+		return NF_ERROR;
+	}
 
 	ret = read(nffile->fd, nffile->block_header, sizeof(data_block_header_t));
-	if ( ret == 0 )		// EOF
+	if ( ret == 0 ) {		// EOF
+	    free(header);
 		return NF_EOF;
+	}
 		
-	if ( ret == -1 )	// ERROR
+	if ( ret == -1 ) {	// ERROR
+		free(header);
 		return NF_ERROR;
+	}
 		
 	// Check for sane buffer size
 	if ( ret != sizeof(data_block_header_t) ) {
 		// this is most likely a corrupt file
+		free(header);
 		LogError("Corrupt data file: Read %i bytes, requested %u\n", ret, sizeof(data_block_header_t));
 		return NF_CORRUPT;
 	}
 
-	// block header read successfully
-	read_bytes = ret;
-
+	// TODO: this check doesn't necessarily hold for compressed blocks (it will in practice)
 	// Check for sane buffer size
 	if ( nffile->block_header->size > BUFFSIZE ) {
 		// this is most likely a corrupt file
@@ -831,138 +904,83 @@ void 	*read_ptr, *buff;
 		return NF_CORRUPT;
 	}
 
-	if ( FILE_IS_LZO_COMPRESSED(nffile) ) 
-		buff = lzo_buff;
-	else if ( FILE_IS_BZ2_COMPRESSED(nffile) )
-		buff = bz2_buff;
-	else
-		buff = nffile->buff_ptr;
-
-	ret = read(nffile->fd, buff, nffile->block_header->size);
-	if ( ret == nffile->block_header->size ) {
-		// we have the whole record and are done for now
-		if ( FILE_IS_LZO_COMPRESSED(nffile) ) {
-			lzo_uint new_len;
-			int r;
-   			r = lzo1x_decompress(lzo_buff,nffile->block_header->size,nffile->buff_ptr,&new_len,NULL);
-   			if (r != LZO_E_OK ) {
-	   			/* this should NEVER happen */
-				LogError("ReadBlock() error decompression failed in %s line %d: LZO error: %d\n", __FILE__, __LINE__, r);
-	   			return NF_CORRUPT;
-   			}
-			nffile->block_header->size = new_len;
-			return read_bytes + new_len;
-		} else if ( FILE_IS_BZ2_COMPRESSED(nffile) ) {
-			bz_stream bs;
-			BZ2_prep_stream (&bs);
-			BZ2_bzDecompressInit (&bs, 0, 0);
-			bs.next_in = bz2_buff;
-			bs.avail_in = ret;
-			bs.next_out = nffile->buff_ptr;
-			bs.avail_out = BUFFSIZE;
-			for (;;) {
-				int r = BZ2_bzDecompress (&bs);
-				if (r == BZ_OK) {
-					continue;
-				} else if (r != BZ_STREAM_END) {
-					BZ2_bzDecompressEnd (&bs);
-					return NF_CORRUPT;
-				} else {
-					break;
-				}
-			}
-			nffile->block_header->size = bs.total_out_lo32;
-			int total = read_bytes + bs.total_out_lo32; //we do not overflow 2^32 here for sure.
-			BZ2_bzDecompressEnd (&bs);
-			return total;
-		} else
-			return read_bytes + ret;
-	} 
-			
-	if ( ret == 0 ) {
-		// EOF not expected here - this should never happen, file may be corrupt
-		LogError("ReadBlock() Corrupt data file: Unexpected EOF while reading data block.\n");
-		return NF_CORRUPT;
-	}
-
-	if ( ret == -1 ) {	// ERROR
-		LogError("read() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+	buff_size = sizeof(data_block_header_t) + nffile->block_header->size;
+	buff = realloc(header, buff_size);
+	if (buff == NULL) {
+		free(header);
+		LogError("Buffer allocation error");
 		return NF_ERROR;
 	}
 
-	// Ups! - ret is != block_header->size
-	// this was a short read - most likely reading from the stdin pipe
-	// loop until we have requested size
-
-	buff_bytes 	 = ret;								// already in buffer
-	request_size = nffile->block_header->size - buff_bytes;	// still to go for this amount of data
-
-	read_ptr 	 = (void *)((pointer_addr_t)buff + buff_bytes);	
-	do {
+	request_size = nffile->block_header->size;
+	read_ptr = buff + sizeof(data_block_header_t);
+	while (request_size > 0) {
 		ret = read(nffile->fd, read_ptr, request_size);
-		if ( ret < 0 ) {
-			// -1: Error - not expected
+	
+		if ( ret == 0 ) {
+			// EOF not expected here - this should never happen, file may be corrupt
+			free(buff);
+			LogError("ReadBlock() Corrupt data file: Unexpected EOF while reading data block.\n");
+			return NF_CORRUPT;
+		}
+
+		if ( ret == -1 ) {	// ERROR
+			free(buff);
 			LogError("read() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 			return NF_ERROR;
 		}
-
-		if ( ret == 0 ) {
-			//  0: EOF   - not expected
-			LogError(error_string, ERR_SIZE, "Corrupt data file: Unexpected EOF. Short read of data block.\n");
-			return NF_CORRUPT;
-		} 
-		
-		buff_bytes 	 += ret;
-		request_size = nffile->block_header->size - buff_bytes;
-
-		if ( request_size > 0 ) {
-			// still a short read - continue in read loop
-			read_ptr = (void *)((pointer_addr_t)buff + buff_bytes);
-		}
-	} while ( request_size > 0 );
-
-	if ( FILE_IS_LZO_COMPRESSED(nffile) ) {
-		int r;
-		lzo_uint new_len;
-   		r = lzo1x_decompress(lzo_buff, nffile->block_header->size, nffile->buff_ptr, &new_len, NULL);
-   		if (r != LZO_E_OK ) {
-	   		/* this should NEVER happen */
-			LogError("ReadBlock() error decompression failed in %s line %d: LZO error: %d\n", __FILE__, __LINE__, r);
-	   		return NF_CORRUPT;
-   		}
-		nffile->block_header->size = new_len;
-		return read_bytes + new_len;
-
-	} else if ( FILE_IS_BZ2_COMPRESSED(nffile) ) {
-			bz_stream bs;
-			BZ2_prep_stream (&bs);
-			BZ2_bzDecompressInit (&bs, 0, 0);
-			bs.next_in = bz2_buff;
-			bs.avail_in = ret;
-			bs.next_out = nffile->buff_ptr;
-			bs.avail_out = BUFFSIZE;
-			for (;;) {
-				int r = BZ2_bzDecompress (&bs);
-				if (r == BZ_OK) {
-					continue;
-				} else if (r != BZ_STREAM_END) {
-					BZ2_bzDecompressEnd (&bs);
-					return NF_CORRUPT;
-				} else {
-					break;
-				}
-			}
-			nffile->block_header->size = bs.total_out_lo32;
-			int total = read_bytes + bs.total_out_lo32; //we do not overflow 2^32 here for sure.
-			BZ2_bzDecompressEnd (&bs);
-			return total;
-	} else {
-		// finally - we are done for now
-		return read_bytes + buff_bytes;
+		request_size -= ret;
+		read_ptr += ret;
 	}
 
-	/* not reached */
+	*block = (data_block_header_t*)buff;
+	return buff_size;
+}
 
+
+ssize_t DecompressBlock(nffile_t *nffile, data_block_header_t **block) {
+data_block_header_t *out_block;
+int ret;
+
+	if ( FILE_IS_LZO_COMPRESSED(nffile) ) {
+		ret = DecompressLzo(*block, &out_block);
+		if (ret >= 0)
+			*block = out_block;
+	} else if ( FILE_IS_BZ2_COMPRESSED(nffile) ) {
+		ret = DecompressBz2(*block, &out_block);
+		if (ret >= 0)
+			*block = out_block;
+	} else {
+		ret = sizeof(data_block_header_t) + (*block)->size;
+	}
+	return ret;
+}
+
+
+int ReadBlock(nffile_t *nffile) {
+int ret;
+
+	data_block_header_t *block;
+
+	ret = (int)ReadBlockData(nffile, &block);
+	
+	if (ret < 0) {
+		free(block);
+		return ret;
+	}
+
+	ret = (int)DecompressBlock(nffile, &block);
+
+	if (ret < 0) {
+		free(block);
+		return ret;
+	}
+
+	memcpy(nffile->block_header, block, ret);
+
+	free(block);
+
+	return ret;
 } // End of ReadBlock
 
 
@@ -1019,12 +1037,12 @@ int ret;
 	bs.avail_out = out_len;
 
 	for (;;) {
-		int r = BZ2_bzCompress (&bs, BZ_FINISH);
-		if (r == BZ_FINISH_OK) continue;
-		if (r != BZ_STREAM_END) {
+		ret = BZ2_bzCompress (&bs, BZ_FINISH);
+		if (ret == BZ_FINISH_OK) continue;
+		if (ret != BZ_STREAM_END) {
 			free(*out_block);
 			*out_block = NULL;
-			snprintf (error_string, ERR_SIZE, "bz2 compression failed: %d" , r);
+			snprintf (error_string, ERR_SIZE, "bz2 compression failed: %d" , ret);
 			error_string[ERR_SIZE - 1] = 0;
 			BZ2_bzCompressEnd (&bs);
 			return -2;
@@ -1056,9 +1074,9 @@ int ret = 0;
 		out_block_header = nffile->block_header;
 	}
 
-	if (ret < 0) {
+	// Compression failure
+	if (ret < 0)
 		return ret;
-	}
 
 	ret = write (nffile->fd, (void *) out_block_header, sizeof (data_block_header_t) + out_block_header->size);
 	if (ret > 0) {
@@ -1077,11 +1095,7 @@ int ret = 0;
 
 int WriteExtraBlock(nffile_t *nffile, data_block_header_t *block_header) {
 data_block_header_t *out_block_header;
-int r, ret;
-unsigned char __LZO_MMODEL *in;
-unsigned char __LZO_MMODEL *out;
-lzo_uint in_len;
-lzo_uint out_len;
+int  ret = 0;
 
 
 	if ( FILE_IS_LZO_COMPRESSED(nffile) && block_header->id != CATALOG_BLOCK) {
@@ -1094,6 +1108,10 @@ lzo_uint out_len;
 		// not compressed or catalog block
 		out_block_header = block_header;
 	}
+
+	// Compression failure
+	if (ret < 0)
+		return ret;
 
 	ret =  write(nffile->fd, (void *)out_block_header, sizeof(data_block_header_t) + out_block_header->size);
 	if ( ret > 0 ) {
