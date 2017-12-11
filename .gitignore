@@ -30,3 +30,59 @@
 
 # Debug files
 *.dSYM/
+
+# Backup files
+*~
+
+# Doc
+/doc/Doxyfile
+/doc/Makefile.in
+/doc/Makefile
+/doc/html
+/doc/man
+/doc/xml
+
+# Autotools output
+/Makefile.in
+/aclocal.m4
+/autom4te.cache/
+/bin/Makefile.in
+/compile
+/config.guess
+/config.h.in~
+/config.sub
+/configure
+/depcomp
+/install-sh
+/ltmain.sh
+/man/Makefile.in
+/missing
+/test-driver
+/ylwrap
+/config.h.in
+/INSTALL
+/Makefile
+/bin/.deps/
+/bin/Makefile
+/bin/grammar.c
+/bin/grammar.h
+/bin/scanner.c
+/config.h
+/config.log
+/config.status
+/extra/nftrack/.deps/
+/libtool
+/man/Makefile
+/stamp-h1
+
+# Binaries
+/bin/.libs/
+/bin/nfanon
+/bin/nfcapd
+/bin/nfpcapd
+/bin/nfdump
+/bin/nfexpire
+/bin/nfreplay
+/bin/nfprofile
+/bin/nftrack
+/bin/sfcapd
