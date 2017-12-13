@@ -70,19 +70,21 @@ char 	*CurrentIdent;
 #define READ_FILE	1
 #define WRITE_FILE	1
 
-// LZO params
+// Compression buffer sizes
 #define LZO_BUFFSIZE(size)  (((size) + (size) / 16 + 64 + 3) + sizeof(data_block_header_t))
 #define BZ2_BUFFSIZE(size)  ((101 * (size)) / 100 + 600 + sizeof(data_block_header_t))
+#define LZ4_BUFFSIZE(size)  (LZ4_compressBound(size) + sizeof (data_block_header_t))
+#define LZMA_BUFFSIZE(size) (lzma_stream_buffer_bound(size) + sizeof (data_block_header_t))
 
 static int lzo_initialized = 0;
 static int lz4_initialized = 0;
 static int bz2_initialized = 0;
+static int lzma_initialized = 0;
 
 static int LZO_initialize(void);
-
 static int LZ4_initialize(void);
-
 static int BZ2_initialize(void);
+static int LZMA_initialize(void);
 
 static void BZ2_prep_stream (bz_stream*);
 
@@ -850,7 +852,8 @@ int ret;
 
 	ret = lzo1x_decompress(in_data, in_block->size, out_data, &out_size, NULL);
 	if (ret != LZO_E_OK ) {
-		LogError("ReadBlock() error decompression failed in %s line %d: LZO error: %d\n", __FILE__, __LINE__, ret);
+		free(*out_block);
+		LogError("Decompression failed. LZO error: %d\n", ret);
 		return NF_CORRUPT;
 	}
 	(*out_block)->size = out_size;
@@ -877,11 +880,13 @@ BZ2_prep_stream (&bs);
 	bs.next_out = (char*)*out_block + sizeof(data_block_header_t);
 	bs.avail_out = BUFFSIZE;
 	for (;;) {
-		int r = BZ2_bzDecompress (&bs);
-		if (r == BZ_OK) {
+		int ret = BZ2_bzDecompress (&bs);
+		if (ret == BZ_OK) {
 			continue;
-		} else if (r != BZ_STREAM_END) {
+		} else if (ret != BZ_STREAM_END) {
+			free(*out_block);
 			BZ2_bzDecompressEnd (&bs);
+		    LogError("Decompression failed. BZ2 error: %d\n", ret);
 			return NF_CORRUPT;
 		} else {
 			break;
@@ -947,7 +952,7 @@ void 	*read_ptr, *buff, *header;
 		if ( ret == 0 ) {
 			// EOF not expected here - this should never happen, file may be corrupt
 			free(buff);
-			LogError("ReadBlock() Corrupt data file: Unexpected EOF while reading data block.\n");
+			LogError("Corrupt data file: Unexpected EOF while reading data block.\n");
 			return NF_CORRUPT;
 		}
 

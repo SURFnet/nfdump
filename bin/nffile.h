@@ -2200,8 +2200,12 @@ int ReadBlock(nffile_t *nffile);
 
 int CompressLzo(data_block_header_t *in_block, data_block_header_t **out_block);
 int CompressBz2(data_block_header_t *in_block, data_block_header_t **out_block);
+int CompressLz4(data_block_header_t *in_block, data_block_header_t **out_block);
+int CompressLzma(data_block_header_t *in_block, data_block_header_t **out_block);
 ssize_t DecompressLzo(data_block_header_t *in_block, data_block_header_t **out_block);
 ssize_t DecompressBz2(data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressLz4(data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressLzma(data_block_header_t *in_block, data_block_header_t **out_block);
 
 int WriteBlock(nffile_t *nffile);
 
