@@ -897,6 +897,17 @@ BZ2_prep_stream (&bs);
 	return (*out_block)->size + sizeof(data_block_header_t);
 }
 
+ssize_t DecompressLz4(data_block_header_t *in_block, data_block_header_t **out_block) {
+	return (*out_block)->size + sizeof(data_block_header_t);
+}
+
+ssize_t DecompressLzma(data_block_header_t *in_block, data_block_header_t **out_block) {
+	return (*out_block)->size + sizeof(data_block_header_t);
+}
+
+ssize_t DecompressNone(data_block_header_t *in_block, data_block_header_t **out_block) {
+	return (*out_block)->size + sizeof(data_block_header_t);
+}
 
 ssize_t ReadBlockData(nffile_t *nffile, data_block_header_t **block) {
 ssize_t ret, buff_size, request_size;
@@ -972,18 +983,23 @@ void 	*read_ptr, *buff, *header;
 
 ssize_t DecompressBlock(nffile_t *nffile, data_block_header_t **block) {
 data_block_header_t *out_block;
-int ret;
+int ret = 0;
 
-	if ( FILE_IS_LZO_COMPRESSED(nffile) ) {
-		ret = DecompressLzo(*block, &out_block);
-		if (ret >= 0)
-			*block = out_block;
-	} else if ( FILE_IS_BZ2_COMPRESSED(nffile) ) {
-		ret = DecompressBz2(*block, &out_block);
-		if (ret >= 0)
-			*block = out_block;
-	} else {
-		ret = sizeof(data_block_header_t) + (*block)->size;
+	switch (FILE_COMPRESSION(nffile)) {
+		case LZO_COMPRESSED:
+			ret = DecompressLzo(*block, &out_block);
+			break;
+		case BZ2_COMPRESSED:
+			ret = DecompressBz2(*block, &out_block);
+			break;
+		case LZ4_COMPRESSED:
+			ret = DecompressLz4(*block, &out_block);
+			break;
+		case LZMA_COMPRESSED:
+			ret = DecompressLzma(*block, &out_block);
+			break;
+		default:
+			ret = DecompressNone(*block, &out_block);
 	}
 	return ret;
 }
@@ -1086,6 +1102,13 @@ int ret;
 	return 0;
 }
 
+int CompressLz4(data_block_header_t *in_block, data_block_header_t **out_block) {
+	return 0;
+}
+int CompressLzma(data_block_header_t *in_block, data_block_header_t **out_block) {
+	return 0;
+}
+
 int WriteBlock(nffile_t *nffile) {
 data_block_header_t *out_block_header;
 int ret = 0;
@@ -1094,15 +1117,22 @@ int ret = 0;
 	if ( nffile->block_header->size == 0 )
 		return 1;
 
-	if ( FILE_IS_LZO_COMPRESSED(nffile) ) {
-		ret = CompressLzo(nffile->block_header, &out_block_header);
-	}
-	else if ( FILE_IS_BZ2_COMPRESSED(nffile) ) {
-		ret = CompressBz2(nffile->block_header, &out_block_header);
-	}
-	else {
-		// not compressed
-		out_block_header = nffile->block_header;
+	switch (FILE_COMPRESSION(nffile)) {
+		case LZO_COMPRESSED:
+		    ret = CompressLzo(nffile->block_header, &out_block_header);
+			break;
+		case BZ2_COMPRESSED:
+			ret = CompressBz2(nffile->block_header, &out_block_header);
+			break;
+		case LZ4_COMPRESSED:
+			ret = CompressLz4(nffile->block_header, &out_block_header);
+			break;
+		case LZMA_COMPRESSED:
+			ret = CompressLzma(nffile->block_header, &out_block_header);
+			break;
+		default:
+			// not compressed
+			out_block_header = nffile->block_header;
 	}
 
 	// Compression failure

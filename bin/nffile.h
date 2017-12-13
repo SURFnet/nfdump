@@ -28,12 +28,6 @@
  *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
  *  POSSIBILITY OF SUCH DAMAGE.
- *  
- *  $Author: haag $
- *
- *  $Id: nffile.h 40 2009-12-16 10:41:44Z haag $
- *
- *  $LastChangedRevision: 40 $
  *	
  */
 
@@ -91,6 +85,7 @@
 #define LZO_COMPRESSED 1
 #define BZ2_COMPRESSED 2
 #define LZ4_COMPRESSED 3
+#define LZMA_COMPRESSED 4
 
 typedef struct file_header_s {
 	uint16_t	magic;				// magic to recognize nfdump file type and endian type
@@ -116,7 +111,7 @@ typedef struct file_header_s {
 #define FILE_IS_LZO_COMPRESSED(n) ((n)->file_header->flags & FLAG_LZO_COMPRESSED)
 #define FILE_IS_BZ2_COMPRESSED(n) ((n)->file_header->flags & FLAG_BZ2_COMPRESSED)
 #define FILE_IS_LZ4_COMPRESSED(n) ((n)->file_header->flags & FLAG_LZ4_COMPRESSED)
-#define FILE_COMPRESSION(n) (FILE_IS_LZO_COMPRESSED(n) ? LZO_COMPRESSED : (FILE_IS_BZ2_COMPRESSED(n) ? BZ2_COMPRESSED : (FILE_IS_LZ4_COMPRESSED(n) ? LZ4_COMPRESSED : NOT_COMPRESSED)))
+#define FILE_COMPRESSION(n) (FILE_IS_LZO_COMPRESSED(n) ? LZO_COMPRESSED : (FILE_IS_BZ2_COMPRESSED(n) ? BZ2_COMPRESSED : (FILE_IS_LZ4_COMPRESSED(n) ? LZ4_COMPRESSED : (FILE_IS_LZMA_COMPRESSED(n) ? LZMA_COMPRESSED : NOT_COMPRESSED))))
 
 #define BLOCK_IS_COMPRESSED(n) ((n)->flags == 2 )
 #define IP_ANONYMIZED(n) ((n)->file_header->flags & FLAG_ANONYMIZED)
@@ -2206,6 +2201,7 @@ ssize_t DecompressLzo(data_block_header_t *in_block, data_block_header_t **out_b
 ssize_t DecompressBz2(data_block_header_t *in_block, data_block_header_t **out_block);
 ssize_t DecompressLz4(data_block_header_t *in_block, data_block_header_t **out_block);
 ssize_t DecompressLzma(data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressNone(data_block_header_t *in_block, data_block_header_t **out_block);
 
 int WriteBlock(nffile_t *nffile);
 
