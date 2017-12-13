@@ -1,4 +1,4 @@
-/*
+/*  vi: noexpandtab tabstop=4 shiftwidth=4
  *  Copyright (c) 2017, Peter Haag
  *  Copyright (c) 2014, Peter Haag
  *  Copyright (c) 2009, Peter Haag
@@ -98,16 +98,18 @@ typedef struct file_header_s {
 
 	uint16_t	version;			// version of binary file layout, incl. magic
 #define LAYOUT_VERSION_1	1
+#define LAYOUT_VERSION_2	2
 
 	uint32_t	flags;				
 #define NUM_FLAGS		4
-#define FLAG_NOT_COMPRESSED	0x0		// records are not compressed
-#define FLAG_LZO_COMPRESSED	0x1		// records are LZO compressed
-#define FLAG_ANONYMIZED 	0x2		// flow data are anonimized 
-#define FLAG_CATALOG		0x4		// has a file catalog record after stat record
-#define FLAG_BZ2_COMPRESSED 0x8		// records are BZ2 compressed
-#define FLAG_LZ4_COMPRESSED 0x10	// records are LZ4 compressed
-#define COMPRESSION_MASK	0x19	// all compression bits
+#define FLAG_NOT_COMPRESSED  0x00	// records are not compressed
+#define FLAG_LZO_COMPRESSED  0x01	// records are LZO compressed
+#define FLAG_ANONYMIZED      0x02	// flow data are anonimized 
+#define FLAG_CATALOG         0x04   	// has a file catalog record after stat record
+#define FLAG_BZ2_COMPRESSED  0x08	// records are BZ2 compressed
+#define FLAG_LZ4_COMPRESSED  0x10   	// records are LZ4 compressed (LAYOUT_VERSION_2)
+#define FLAG_LZMA_COMPRESSED 0x20   	// records are LZMA compressed (LAYOUT_VERSION_2)
+#define COMPRESSION_MASK     0x29	// all compression bits
 // shortcuts
 
 #define FILE_IS_NOT_COMPRESSED(n) (((n)->file_header->flags & COMPRESSION_MASK) == 0)
@@ -118,7 +120,6 @@ typedef struct file_header_s {
 
 #define BLOCK_IS_COMPRESSED(n) ((n)->flags == 2 )
 #define IP_ANONYMIZED(n) ((n)->file_header->flags & FLAG_ANONYMIZED)
-
 							
 	uint32_t	NumBlocks;			// number of data blocks in file
 	char		ident[IDENTLEN];	// string identifier for this file
@@ -247,11 +248,8 @@ typedef struct catalog_s {
  */
 typedef struct nffile_s {
 	file_header_t		*file_header;	// file header
-#define NUM_BUFFS 2
-	void				*buff_pool[NUM_BUFFS];	// buffer space for read/write/compression 
-	size_t				buff_size;
-	data_block_header_t	*block_header;	// buffer ptr
-	void				*buff_ptr;		// pointer into buffer for read/write blocks/records
+	data_block_header_t	*block_header;	// buffer
+	void			*buff_ptr;	// pointer into buffer for read/write blocks/records
 	stat_record_t 		*stat_record;	// flow stat record
 	int					fd;				// file descriptor
 } nffile_t;
@@ -2196,7 +2194,14 @@ void CloseFile(nffile_t *nffile);
 
 int CloseUpdateFile(nffile_t *nffile, char *ident);
 
+ssize_t ReadBlockData(nffile_t *nffile, data_block_header_t **block);
+ssize_t DecompressBlock(nffile_t *nffile, data_block_header_t **block);
 int ReadBlock(nffile_t *nffile);
+
+int CompressLzo(data_block_header_t *in_block, data_block_header_t **out_block);
+int CompressBz2(data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressLzo(data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressBz2(data_block_header_t *in_block, data_block_header_t **out_block);
 
 int WriteBlock(nffile_t *nffile);
 
