@@ -55,7 +55,14 @@
 #endif
 
 #include "minilzo.h"
+#ifdef HAVE_LIBLZ4
+#include <lz4.h>
+#else 
 #include "lz4.h"
+#endif
+#ifdef HAVE_LIBLZMA
+#include <lzma.h>
+#endif
 #include "nf_common.h"
 #include "nffile.h"
 #include "flist.h"
@@ -74,7 +81,11 @@ char 	*CurrentIdent;
 #define LZO_BUFFSIZE(size)  (((size) + (size) / 16 + 64 + 3) + sizeof(data_block_header_t))
 #define BZ2_BUFFSIZE(size)  ((101 * (size)) / 100 + 600 + sizeof(data_block_header_t))
 #define LZ4_BUFFSIZE(size)  (LZ4_compressBound(size) + sizeof (data_block_header_t))
+#ifdef HAVE_LIBLZMA
 #define LZMA_BUFFSIZE(size) (lzma_stream_buffer_bound(size) + sizeof (data_block_header_t))
+#else
+#define LZMA_BUFFSIZE(size) ((size) + sizeof (data_block_header_t))
+#endif
 
 static int lzo_initialized = 0;
 static int lz4_initialized = 0;
@@ -169,6 +180,13 @@ static int BZ2_initialize (void) {
 	return 1;
 
 } // End of BZ2_initialize
+
+
+static int LZMA_initialize(void) {
+	lzma_initialized = 1;
+	return 1;
+}
+
 
 static void BZ2_prep_stream (bz_stream* bs)
 {
@@ -275,6 +293,12 @@ int ret, allocated;
 			break;
 		case BZ2_COMPRESSED: 
 			if ( !bz2_initialized && !BZ2_initialize() && allocated ) {
+				DisposeFile(nffile);
+				return NULL;
+			}
+			break;
+		case LZMA_COMPRESSED: 
+			if ( !lzma_initialized && !LZMA_initialize() && allocated ) {
 				DisposeFile(nffile);
 				return NULL;
 			}

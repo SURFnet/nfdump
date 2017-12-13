@@ -111,6 +111,7 @@ typedef struct file_header_s {
 #define FILE_IS_LZO_COMPRESSED(n) ((n)->file_header->flags & FLAG_LZO_COMPRESSED)
 #define FILE_IS_BZ2_COMPRESSED(n) ((n)->file_header->flags & FLAG_BZ2_COMPRESSED)
 #define FILE_IS_LZ4_COMPRESSED(n) ((n)->file_header->flags & FLAG_LZ4_COMPRESSED)
+#define FILE_IS_LZMA_COMPRESSED(n) ((n)->file_header->flags & FLAG_LZMA_COMPRESSED)
 #define FILE_COMPRESSION(n) (FILE_IS_LZO_COMPRESSED(n) ? LZO_COMPRESSED : (FILE_IS_BZ2_COMPRESSED(n) ? BZ2_COMPRESSED : (FILE_IS_LZ4_COMPRESSED(n) ? LZ4_COMPRESSED : (FILE_IS_LZMA_COMPRESSED(n) ? LZMA_COMPRESSED : NOT_COMPRESSED))))
 
 #define BLOCK_IS_COMPRESSED(n) ((n)->flags == 2 )
