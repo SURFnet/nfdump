@@ -165,7 +165,7 @@ uint32_t recsize[4];
         	return;
     	}
 		// fill buffer
-		memcpy(nffile_w->buff_pool[0], nffile_r->buff_pool[0], nffile_r->buff_size);
+		memcpy(nffile_w->buff_ptr, nffile_r->buff_ptr, bsize);
 		gettimeofday(&(tstart[compress]), (struct timezone*)NULL);
 		for ( i=0; i<100; i++ ) {
 			nffile_w->block_header->size = bsize;
