@@ -859,7 +859,7 @@ int CloseUpdateFile(nffile_t *nffile, char *ident) {
 
 ssize_t DecompressLzo(data_block_header_t *in_block, data_block_header_t **out_block) {
 int ret;
-	lzo_uint new_len = sizeof(data_block_header_t) + BUFFSIZE;
+lzo_uint new_len = sizeof(data_block_header_t) + BUFFSIZE;
 	// Allocate space for decompressed data
 	*out_block = (data_block_header_t*)malloc(new_len);
 	if (*out_block == NULL) {
@@ -888,7 +888,7 @@ int ret;
 ssize_t DecompressBz2(data_block_header_t *in_block, data_block_header_t **out_block) {
 bz_stream bs;
 BZ2_prep_stream (&bs);
-	ssize_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
+ssize_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 	// Allocate space for decompressed data
 	*out_block = (data_block_header_t*)malloc(new_len);
 	if (*out_block == NULL) {
@@ -922,7 +922,29 @@ BZ2_prep_stream (&bs);
 }
 
 ssize_t DecompressLz4(data_block_header_t *in_block, data_block_header_t **out_block) {
-	return (*out_block)->size + sizeof(data_block_header_t);
+int ret;
+size_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
+	// Allocate space for decompressed data
+	*out_block = (data_block_header_t*)malloc(new_len);
+	if (*out_block == NULL) {
+		LogError("Failed to allocate LZ4 decompression buffer");
+		return NF_ERROR;
+	}
+	// Copy block header
+	**out_block = *in_block;
+
+	// Point to start of block data
+	char* in_data = (char*)in_block + sizeof(data_block_header_t);
+	char* out_data = (char*)*out_block + sizeof(data_block_header_t);
+
+	ret = LZ4_decompress_safe(in_data, out_data, in_block->size, BUFFSIZE);
+	if (ret < 0 ) {
+		free(*out_block);
+		LogError("Decompression failed. LZ4 error: %d\n", ret);
+		return NF_CORRUPT;
+	}
+	(*out_block)->size = ret;
+	return ret + sizeof(data_block_header_t);
 }
 
 ssize_t DecompressLzma(data_block_header_t *in_block, data_block_header_t **out_block) {
