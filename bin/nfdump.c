@@ -286,7 +286,7 @@ static void usage(char *name) {
 					"\t\tand ordered by <order>: packets, bytes, flows, bps pps and bpp.\n"
 					"-q\t\tQuiet: Do not print the header and bottom stat lines.\n"
 					"-i <ident>\tChange Ident to <ident> in file given by -r.\n"
-					"-J <num>\tModify file compression: 0: uncompressed - 1: LZO - 2: BZ2 - 3: LZ4 compressed.\n"
+					"-J <num>\tModify file compression: 0: uncompressed, 1: LZO, 2: BZ2, 3: LZ4, 4: LZMA compressed.\n"
 					"-z\t\tLZO compress flows in output file. Used in combination with -w.\n"
 					"-y\t\tLZ4 compress flows in output file. Used in combination with -w.\n"
 					"-j\t\tBZ2 compress flows in output file. Used in combination with -w.\n"
@@ -927,8 +927,8 @@ char 		Ident[IDENTLEN];
 				break;
 			case 'J':
 				ModifyCompress = atoi(optarg);
-				if ( (ModifyCompress < 0) || (ModifyCompress > 3) ) {
-					LogError("Expected -J <num>, 0: uncompressed, 1: LZO, 2: BZ2, 3: LZ4 compressed.\n");
+				if ( (ModifyCompress < NOT_COMPRESSED) || (ModifyCompress > LZMA_COMPRESSED) ) {
+					LogError("Expected -J <num>, 0: uncompressed, 1: LZO, 2: BZ2, 3: LZ4, 4: LZMA compressed.\n");
 					exit(255);
 				}
 				break;

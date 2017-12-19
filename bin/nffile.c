@@ -48,18 +48,17 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <assert.h>
+#ifdef HAVE_LIBBZ2
 #include <bzlib.h>
+#endif
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
 
 #include "minilzo.h"
-#ifdef HAVE_LIBLZ4
-#include <lz4.h>
-#else 
 #include "lz4.h"
-#endif
 #ifdef HAVE_LIBLZMA
 #include <lzma.h>
 #endif
@@ -91,13 +90,15 @@ static int lzo_initialized = 0;
 static int lz4_initialized = 0;
 static int bz2_initialized = 0;
 static int lzma_initialized = 0;
+#ifdef HAVE_LIBLZMA
+static int lzma_preset = 6;
+#endif
 
 static int LZO_initialize(void);
 static int LZ4_initialize(void);
 static int BZ2_initialize(void);
 static int LZMA_initialize(void);
 
-static void BZ2_prep_stream (bz_stream*);
 
 static int OpenRaw(char *filename, stat_record_t *stat_record, int *compressed);
 
@@ -174,26 +175,36 @@ static int LZ4_initialize (void) {
 } // End of LZ4_initialize
 
 static int BZ2_initialize (void) {
-
+#ifdef HAVE_LIBBZ2
 	bz2_initialized = 1;
-
 	return 1;
-
+#else
+	LogError("BZ2 compression support not compiled in.\n");
+	return 0;
+#endif
 } // End of BZ2_initialize
 
 
 static int LZMA_initialize(void) {
+#ifdef HAVE_LIBLZMA
 	lzma_initialized = 1;
 	return 1;
+#else
+	LogError("LZMA compression support not compiled in.\n");
+	return 0;
+#endif
 }
 
 
+#ifdef HAVE_LIBBZ2
+static void BZ2_prep_stream (bz_stream*);
 static void BZ2_prep_stream (bz_stream* bs)
 {
    bs->bzalloc = NULL;
    bs->bzfree = NULL;
    bs->opaque = NULL;
 } // End of BZ2_prep_stream
+#endif
 
 
 nffile_t *OpenFile(char *filename, nffile_t *nffile){
@@ -877,6 +888,7 @@ lzo_uint new_len = sizeof(data_block_header_t) + BUFFSIZE;
 	ret = lzo1x_decompress(in_data, in_block->size, out_data, &out_size, NULL);
 	if (ret != LZO_E_OK ) {
 		free(*out_block);
+		*out_block = NULL;
 		LogError("Decompression failed. LZO error: %d\n", ret);
 		return NF_CORRUPT;
 	}
@@ -886,6 +898,7 @@ lzo_uint new_len = sizeof(data_block_header_t) + BUFFSIZE;
 
 
 ssize_t DecompressBz2(data_block_header_t *in_block, data_block_header_t **out_block) {
+#ifdef HAVE_LIBBZ2
 bz_stream bs;
 BZ2_prep_stream (&bs);
 ssize_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
@@ -909,6 +922,7 @@ ssize_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 			continue;
 		} else if (ret != BZ_STREAM_END) {
 			free(*out_block);
+		    *out_block = NULL;
 			BZ2_bzDecompressEnd (&bs);
 		    LogError("Decompression failed. BZ2 error: %d\n", ret);
 			return NF_CORRUPT;
@@ -919,6 +933,10 @@ ssize_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 	(*out_block)->size = bs.total_out_lo32;
 	BZ2_bzDecompressEnd (&bs);
 	return (*out_block)->size + sizeof(data_block_header_t);
+#else
+	LogError("BZ2 compression support not compiled in.\n");
+	return NF_ERROR;
+#endif
 }
 
 ssize_t DecompressLz4(data_block_header_t *in_block, data_block_header_t **out_block) {
@@ -940,6 +958,7 @@ size_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 	ret = LZ4_decompress_safe(in_data, out_data, in_block->size, BUFFSIZE);
 	if (ret < 0 ) {
 		free(*out_block);
+		*out_block = NULL;
 		LogError("Decompression failed. LZ4 error: %d\n", ret);
 		return NF_CORRUPT;
 	}
@@ -949,30 +968,92 @@ size_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 
 ssize_t DecompressLzma(data_block_header_t *in_block, data_block_header_t **out_block) {
 	return (*out_block)->size + sizeof(data_block_header_t);
+#ifdef HAVE_LIBLZMA
+int ret;
+uint64_t mem_limit = 0x04000000;
+size_t in_pos = 0, out_pos = 0;
+size_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
+
+	// Allocate space for decompressed data
+	*out_block = (data_block_header_t*)malloc(new_len);
+	if (*out_block == NULL) {
+		LogError("Failed to allocate LZ4 decompression buffer");
+		return NF_ERROR;
+	}
+	// Copy block header
+	**out_block = *in_block;
+
+	// Point to start of block data
+	unsigned char* in_data = (unsigned char*)in_block + sizeof(data_block_header_t);
+	unsigned char* out_data = (unsigned char*)*out_block + sizeof(data_block_header_t);
+
+	ret = lzma_stream_buffer_decode(
+			&mem_limit,  // Max memory to be used
+			0,           // Flags
+			NULL,        // allocator. NULL means (malloc, free)
+			in_data,
+			&in_pos,
+			in_block->size,
+			out_data,
+			&out_pos,
+			BUFFSIZE);
+	if (ret != LZMA_OK) {
+		free(*out_block);
+		*out_block = NULL;
+		LogError("Decompression failed. LZMA error: %d\n", ret);
+		return NF_CORRUPT;
+	}
+    (*out_block)->size = out_pos;
+	return out_pos + sizeof(data_block_header_t);
+#else
+	LogError("LZMA support is not compiled in.\n");
+	return NF_ERROR;
+#endif
 }
 
 ssize_t DecompressNone(data_block_header_t *in_block, data_block_header_t **out_block) {
-	return (*out_block)->size + sizeof(data_block_header_t);
+size_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
+size_t out_len;
+
+	// Allocate space for decompressed data
+	*out_block = (data_block_header_t*)malloc(new_len);
+	if (*out_block == NULL) {
+		LogError("Failed to allocate decompression buffer");
+		return NF_ERROR;
+	}
+	// Copy block header
+	**out_block = *in_block;
+
+	// Point to start of block data
+	unsigned char* in_data = (unsigned char*)in_block + sizeof(data_block_header_t);
+	unsigned char* out_data = (unsigned char*)*out_block + sizeof(data_block_header_t);
+	out_len = in_block->size < BUFFSIZE ? in_block->size : BUFFSIZE;
+	memcpy(out_data, in_data, out_len);
+    (*out_block)->size = out_len;
+	return out_len + sizeof(data_block_header_t);
 }
 
 ssize_t ReadBlockData(nffile_t *nffile, data_block_header_t **block) {
 ssize_t ret, buff_size, request_size;
-void 	*read_ptr, *buff, *header;
+void 	*read_ptr; 
+data_block_header_t *header, *buff;
 
-    header = malloc(sizeof(data_block_header_t));
+    assert(*block == NULL);
+
+    header = (data_block_header_t*)malloc(sizeof(data_block_header_t));
 
 	if (header == NULL) {
 		LogError("Failed to allocate memory for block header");
 		return NF_ERROR;
 	}
 
-	ret = read(nffile->fd, nffile->block_header, sizeof(data_block_header_t));
+	ret = read(nffile->fd, header, sizeof(data_block_header_t));
 	if ( ret == 0 ) {		// EOF
 	    free(header);
 		return NF_EOF;
 	}
 		
-	if ( ret == -1 ) {	// ERROR
+	if ( ret < 0 ) {	// ERROR
 		free(header);
 		return NF_ERROR;
 	}
@@ -985,24 +1066,24 @@ void 	*read_ptr, *buff, *header;
 		return NF_CORRUPT;
 	}
 
-	// TODO: this check doesn't necessarily hold for compressed blocks (it will in practice)
 	// Check for sane buffer size
-	if ( nffile->block_header->size > BUFFSIZE ) {
+	if ( header->size > BUFFSIZE ) {
 		// this is most likely a corrupt file
-		LogError("Corrupt data file: Requested buffer size %u exceeds max. buffer size.\n", nffile->block_header->size);
+		free(header);
+		LogError("Corrupt data file: Requested buffer size %u exceeds max. buffer size.\n", header->size);
 		return NF_CORRUPT;
 	}
 
-	buff_size = sizeof(data_block_header_t) + nffile->block_header->size;
-	buff = realloc(header, buff_size);
+	buff_size = sizeof(data_block_header_t) + header->size;
+	buff = (data_block_header_t*)realloc(header, buff_size);
 	if (buff == NULL) {
 		free(header);
 		LogError("Buffer allocation error");
 		return NF_ERROR;
 	}
 
-	request_size = nffile->block_header->size;
-	read_ptr = buff + sizeof(data_block_header_t);
+	request_size = buff->size;
+	read_ptr = (void*)buff + sizeof(data_block_header_t);
 	while (request_size > 0) {
 		ret = read(nffile->fd, read_ptr, request_size);
 	
@@ -1022,14 +1103,16 @@ void 	*read_ptr, *buff, *header;
 		read_ptr += ret;
 	}
 
-	*block = (data_block_header_t*)buff;
+	*block = buff;
 	return buff_size;
 }
 
 
 ssize_t DecompressBlock(nffile_t *nffile, data_block_header_t **block) {
-data_block_header_t *out_block;
+data_block_header_t *out_block = NULL;
 int ret = 0;
+
+    assert(*block != NULL);
 
 	switch (FILE_COMPRESSION(nffile)) {
 		case LZO_COMPRESSED:
@@ -1047,6 +1130,11 @@ int ret = 0;
 		default:
 			ret = DecompressNone(*block, &out_block);
 	}
+	if (ret < 0) {
+		return NF_ERROR;
+	}
+	free(*block);
+	*block = out_block;
 	return ret;
 }
 
@@ -1054,13 +1142,11 @@ int ret = 0;
 
 int ReadBlock(nffile_t *nffile) {
 int ret;
-
-	data_block_header_t *block;
+data_block_header_t *block = NULL;
 
 	ret = (int)ReadBlockData(nffile, &block);
 	
-	if (ret < 0) {
-		free(block);
+	if (ret <= NF_EOF) {
 		return ret;
 	}
 
@@ -1092,7 +1178,7 @@ int ret;
 	**out_block = *in_block;
 
 	in = (lzo_bytep)((pointer_addr_t)in_block + sizeof(data_block_header_t));	
-	out = (lzo_bytep)((pointer_addr_t)out_block + sizeof(data_block_header_t));	
+	out = (lzo_bytep)((pointer_addr_t)*out_block + sizeof(data_block_header_t));	
 
 	lzo_voidp wrkmem = (lzo_voidp*)malloc(LZO1X_1_MEM_COMPRESS);
 
@@ -1103,7 +1189,7 @@ int ret;
 	if (ret != LZO_E_OK) {
         free(*out_block);
         *out_block = NULL;
-		LogError("compression failed: %d" , ret);
+		LogError("LZO compression failed: %d" , ret);
 		return -2;
 	}
     (*out_block)->size = out_len;
@@ -1111,6 +1197,7 @@ int ret;
 }
 
 int CompressBz2(data_block_header_t *in_block, data_block_header_t **out_block) {
+#ifdef HAVE_LIBBZ2
 lzo_uint in_len;
 lzo_uint out_len;
 int ret;
@@ -1125,8 +1212,8 @@ int ret;
 	BZ2_prep_stream (&bs);
 	BZ2_bzCompressInit (&bs, 9, 0, 0);
 
-	bs.next_in = (char*) ( (pointer_addr_t) in_block  + sizeof (data_block_header_t));
-	bs.next_out = (char*) ( (pointer_addr_t) out_block + sizeof (data_block_header_t));
+	bs.next_in = (char*) ( (pointer_addr_t)in_block  + sizeof (data_block_header_t));
+	bs.next_out = (char*) ( (pointer_addr_t)*out_block + sizeof (data_block_header_t));
 	bs.avail_in = in_len;
 	bs.avail_out = out_len;
 
@@ -1136,7 +1223,7 @@ int ret;
 		if (ret != BZ_STREAM_END) {
 			free(*out_block);
 			*out_block = NULL;
-			LogError("bz2 compression failed: %d" , ret);
+			LogError("BZ2 compression failed: %d" , ret);
 			BZ2_bzCompressEnd (&bs);
 			return -2;
 		}
@@ -1146,17 +1233,83 @@ int ret;
 	(*out_block)->size = bs.total_out_lo32;
 	BZ2_bzCompressEnd (&bs);
 	return 0;
+#else
+	LogError("BZ2 compression support not compiled in.\n");
+	return NF_ERROR;
+#endif
 }
+
 
 int CompressLz4(data_block_header_t *in_block, data_block_header_t **out_block) {
-	return 0;
-}
-int CompressLzma(data_block_header_t *in_block, data_block_header_t **out_block) {
-	return 0;
+char* in;
+char* out;
+size_t in_len;
+int ret;
+
+	in_len = (size_t)in_block->size;
+	*out_block = (data_block_header_t *)malloc(LZ4_BUFFSIZE(in_len));
+	// Copy the header
+	**out_block = *in_block;
+
+	in = (char*)((pointer_addr_t)in_block + sizeof(data_block_header_t));	
+	out = (char*)((pointer_addr_t)*out_block + sizeof(data_block_header_t));	
+
+	ret = LZ4_compress_default(in, out, in_len, BUFFSIZE);
+
+	if (ret < 0) {
+        free(*out_block);
+        *out_block = NULL;
+		LogError("LZ4 compression failed: %d" , ret);
+		return -2;
+	}
+    (*out_block)->size = ret;
+    return 0;
 }
 
+
+int CompressLzma(data_block_header_t *in_block, data_block_header_t **out_block) {
+#ifdef HAVE_LIBLZMA
+unsigned char* in;
+unsigned char* out;
+size_t in_len;
+size_t out_pos;
+int ret;
+
+	in_len = (size_t)in_block->size;
+	*out_block = (data_block_header_t *)malloc(LZMA_BUFFSIZE(in_len));
+	// Copy the header
+	**out_block = *in_block;
+
+	in = (unsigned char*)((pointer_addr_t)in_block + sizeof(data_block_header_t));	
+	out = (unsigned char*)((pointer_addr_t)*out_block + sizeof(data_block_header_t));	
+
+	ret = lzma_easy_buffer_encode(
+			lzma_preset,       // preset: high values are expensive and don't bring much
+			LZMA_CHECK_CRC64,  // data corruption check
+			NULL,              // allocator. NULL means (malloc, free)
+			in,
+			in_len,
+			out,
+			&out_pos,
+			BUFFSIZE);
+    
+	if (ret != LZMA_OK) {
+        free(*out_block);
+        *out_block = NULL;
+		LogError("LZMA compression failed: %d" , ret);
+		return -2;
+	}
+    (*out_block)->size = out_pos;
+	return 0;
+#else
+	LogError("LZMA compression support not compiled in.\n");
+	return NF_ERROR;
+#endif
+}
+
+
 int WriteBlock(nffile_t *nffile) {
-data_block_header_t *out_block_header;
+data_block_header_t *out_block_header = NULL;
 int ret = 0;
 
 	// empty blocks need not to be stored 
@@ -1182,19 +1335,20 @@ int ret = 0;
 	}
 
 	// Compression failure
-	if (ret < 0)
+	if (ret < 0) {
 		return ret;
+	}
 
 	ret = write (nffile->fd, (void *) out_block_header, sizeof (data_block_header_t) + out_block_header->size);
 	if (ret > 0) {
 		nffile->block_header->size = 0;
 		nffile->block_header->NumRecords = 0;
-		nffile->buff_ptr = (void *) ( (pointer_addr_t) nffile->block_header + sizeof (data_block_header_t));
 		nffile->file_header->NumBlocks++;
 	}
 
-	if (out_block_header != nffile->block_header)
+	if (out_block_header != nffile->block_header) {
 		free(out_block_header);
+	}
 
 	return ret;
 
