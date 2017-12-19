@@ -1,4 +1,9 @@
-/*  vi: noexpandtab tabstop=4 shiftwidth=4
+// vi: noexpandtab tabstop=4 shiftwidth=4:
+/**
+ * \file
+ * Types and prototypes for reading and writing nfdump files.
+ *
+ * \copyright
  *  Copyright (c) 2017, Peter Haag
  *  Copyright (c) 2014, Peter Haag
  *  Copyright (c) 2009, Peter Haag
@@ -2191,18 +2196,18 @@ void CloseFile(nffile_t *nffile);
 int CloseUpdateFile(nffile_t *nffile, char *ident);
 
 ssize_t ReadBlockData(nffile_t *nffile, data_block_header_t **block);
-ssize_t DecompressBlock(nffile_t *nffile, data_block_header_t **block);
+ssize_t DecompressBlock(int compression, const data_block_header_t *in_block, data_block_header_t ** out_block);
 int ReadBlock(nffile_t *nffile);
 
-int CompressLzo(data_block_header_t *in_block, data_block_header_t **out_block);
-int CompressBz2(data_block_header_t *in_block, data_block_header_t **out_block);
-int CompressLz4(data_block_header_t *in_block, data_block_header_t **out_block);
-int CompressLzma(data_block_header_t *in_block, data_block_header_t **out_block);
-ssize_t DecompressLzo(data_block_header_t *in_block, data_block_header_t **out_block);
-ssize_t DecompressBz2(data_block_header_t *in_block, data_block_header_t **out_block);
-ssize_t DecompressLz4(data_block_header_t *in_block, data_block_header_t **out_block);
-ssize_t DecompressLzma(data_block_header_t *in_block, data_block_header_t **out_block);
-ssize_t DecompressNone(data_block_header_t *in_block, data_block_header_t **out_block);
+int CompressLzo(const data_block_header_t *in_block, data_block_header_t **out_block);
+int CompressBz2(const data_block_header_t *in_block, data_block_header_t **out_block);
+int CompressLz4(const data_block_header_t *in_block, data_block_header_t **out_block);
+int CompressLzma(const data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressLzo(const data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressBz2(const data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressLz4(const data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressLzma(const data_block_header_t *in_block, data_block_header_t **out_block);
+ssize_t DecompressNone(const data_block_header_t *in_block, data_block_header_t **out_block);
 
 int WriteBlock(nffile_t *nffile);
 

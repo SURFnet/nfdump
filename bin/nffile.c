@@ -1,34 +1,40 @@
-/*  vi: noexpandtab tabstop=4 shiftwidth=4
+// vi: noexpandtab tabstop=4 shiftwidth=4:
+/**
+ * \file
+ * Functions for reading and writing nfdump files
+ *
+ * \copyright
  *  Copyright (c) 2017, Peter Haag
  *  Copyright (c) 2014, Peter Haag
  *  Copyright (c) 2011, Peter Haag
  *  Copyright (c) 2004-2008, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
  *  All rights reserved.
- *  
- *  Redistribution and use in source and binary forms, with or without 
+ * 
+ *
+ *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
- *  
- *   * Redistributions of source code must retain the above copyright notice, 
+ * 
+ *   * Redistributions of source code must retain the above copyright notice,
  *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright notice, 
- *     this list of conditions and the following disclaimer in the documentation 
+ *   * Redistributions in binary form must reproduce the above copyright notice,
+ *     this list of conditions and the following disclaimer in the documentation
  *     and/or other materials provided with the distribution.
- *   * Neither the name of the author nor the names of its contributors may be 
- *     used to endorse or promote products derived from this software without 
+ *   * Neither the name of the author nor the names of its contributors may be
+ *     used to endorse or promote products derived from this software without
  *     specific prior written permission.
- *  
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
- *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
- *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
- *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE 
- *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
- *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
- *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
- *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
- *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
+ * 
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
- *  
+ * 
  */
 
 #include "config.h"
@@ -875,7 +881,16 @@ int CloseUpdateFile(nffile_t *nffile, char *ident) {
 } /* End of CloseUpdateFile */
 
 
-ssize_t DecompressLzo(data_block_header_t *in_block, data_block_header_t **out_block) {
+/**
+ * Decompresses datablock that was compressed with LZO.
+ * \see CompressLzo
+ * \param in_block Pointer to block that is to be decompressed
+ * \param out_block Address of pointer to block that will contain decompressed data.
+ *                  This pointer will be allocated and becomes the responsibility of
+ *                  the caller in case the function returns successfuly.
+ * \return Size of out_block on success, NF_ERROR otherwise
+ */
+ssize_t DecompressLzo(const data_block_header_t *in_block, data_block_header_t **out_block) {
 int ret;
 lzo_uint new_len = sizeof(data_block_header_t) + BUFFSIZE;
 	// Allocate space for decompressed data
@@ -904,7 +919,16 @@ lzo_uint new_len = sizeof(data_block_header_t) + BUFFSIZE;
 }
 
 
-ssize_t DecompressBz2(data_block_header_t *in_block, data_block_header_t **out_block) {
+/**
+ * Decompresses datablock that was compressed with BZ2.
+ * \see CompressBz2
+ * \param in_block Pointer to block that is to be decompressed
+ * \param out_block Address of pointer to block that will contain decompressed data.
+ *                  This pointer will be allocated and becomes the responsibility of
+ *                  the caller in case the function returns successfuly.
+ * \return Size of out_block on success, NF_ERROR otherwise
+ */
+ssize_t DecompressBz2(const data_block_header_t *in_block, data_block_header_t **out_block) {
 #ifdef HAVE_LIBBZ2
 bz_stream bs;
 BZ2_prep_stream (&bs);
@@ -946,7 +970,16 @@ ssize_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 #endif
 }
 
-ssize_t DecompressLz4(data_block_header_t *in_block, data_block_header_t **out_block) {
+/**
+ * Decompresses datablock that was compressed with LZ4.
+ * \see CompressLz4
+ * \param in_block Pointer to block that is to be decompressed
+ * \param out_block Address of pointer to block that will contain decompressed data.
+ *                  This pointer will be allocated and becomes the responsibility of
+ *                  the caller in case the function returns successfuly.
+ * \return Size of out_block on success, NF_ERROR otherwise
+ */
+ssize_t DecompressLz4(const data_block_header_t *in_block, data_block_header_t **out_block) {
 int ret;
 size_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 	// Allocate space for decompressed data
@@ -973,7 +1006,16 @@ size_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 	return ret + sizeof(data_block_header_t);
 }
 
-ssize_t DecompressLzma(data_block_header_t *in_block, data_block_header_t **out_block) {
+/**
+ * Decompresses datablock that was compressed with LZMA.
+ * \see CompressLzma
+ * \param in_block Pointer to block that is to be decompressed
+ * \param out_block Address of pointer to block that will contain decompressed data.
+ *                  This pointer will be allocated and becomes the responsibility of
+ *                  the caller in case the function returns successfuly.
+ * \return Size of out_block on success, NF_ERROR otherwise
+ */
+ssize_t DecompressLzma(const data_block_header_t *in_block, data_block_header_t **out_block) {
 #ifdef HAVE_LIBLZMA
 int ret;
 uint64_t mem_limit = 0x04000000;
@@ -1017,7 +1059,16 @@ size_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 #endif
 }
 
-ssize_t DecompressNone(data_block_header_t *in_block, data_block_header_t **out_block) {
+/**
+ * Dummy decompression.
+ * Just copies the input in order to match behavious of other decompression functions.
+ * \param in_block Pointer to block that is to be copied
+ * \param out_block Address of pointer to block that will contain copied data.
+ *                  This pointer will be allocated and becomes the responsibility of
+ *                  the caller in case the function returns successfuly.
+ * \return Size of out_block on success, NF_ERROR otherwise
+ */
+ssize_t DecompressNone(const data_block_header_t *in_block, data_block_header_t **out_block) {
 size_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 size_t out_len;
 
@@ -1039,6 +1090,16 @@ size_t out_len;
 	return out_len + sizeof(data_block_header_t);
 }
 
+/**
+ * Reads one block of data from the file handle in nffile into
+ * block. The block buffer in nffile will not be touched.
+ * \param nffile File handle structure providing the file to read from.
+ * \param block Address of pointer to block that will be allocated and
+ *              will become the responsibilty of the caller when the
+ *              function returns a value bigger than 0.
+ * \return size of out_block, otherwise NF_EOF (0) when the end of the input
+ *         file was reached or a negative value to indicate an error.
+ */
 ssize_t ReadBlockData(nffile_t *nffile, data_block_header_t **block) {
 ssize_t ret, buff_size, request_size;
 void 	*read_ptr; 
@@ -1114,41 +1175,52 @@ data_block_header_t *header, *buff;
 }
 
 
-ssize_t DecompressBlock(nffile_t *nffile, data_block_header_t **block) {
-data_block_header_t *out_block = NULL;
+/**
+ * Decompresses a block.
+ * \param compression Integer indicating the type of compression
+ * \param in_block Address of pointer to block that is to be decompressed.
+ * \param out_block Address of pointer to block with decompressed data. This block
+ *                  will be allocated and becomes the responsibility of the caller
+ *                  when the function returns successfully.
+ * \return size of out_block or NF_ERROR in case of failure
+ */
+ssize_t DecompressBlock(int compression, const data_block_header_t* in_block, data_block_header_t **out_block) {
 int ret = 0;
 
-    assert(*block != NULL);
+    assert(in_block != NULL);
+    assert(*out_block == NULL);
 
-	switch (FILE_COMPRESSION(nffile)) {
+	switch (compression) {
+		case NOT_COMPRESSED:
+			ret = DecompressNone(in_block, out_block);
+			break;
 		case LZO_COMPRESSED:
-			ret = DecompressLzo(*block, &out_block);
+			ret = DecompressLzo(in_block, out_block);
 			break;
 		case BZ2_COMPRESSED:
-			ret = DecompressBz2(*block, &out_block);
+			ret = DecompressBz2(in_block, out_block);
 			break;
 		case LZ4_COMPRESSED:
-			ret = DecompressLz4(*block, &out_block);
+			ret = DecompressLz4(in_block, out_block);
 			break;
 		case LZMA_COMPRESSED:
-			ret = DecompressLzma(*block, &out_block);
+			ret = DecompressLzma(in_block, out_block);
 			break;
 		default:
-			ret = DecompressNone(*block, &out_block);
+			LogError("Unknown compression ID: %i\n", compression);
+			return NF_ERROR;
 	}
 	if (ret < 0) {
 		return NF_ERROR;
 	}
-	free(*block);
-	*block = out_block;
 	return ret;
 }
 
-	/* not reached */
 
 int ReadBlock(nffile_t *nffile) {
 int ret;
 data_block_header_t *block = NULL;
+data_block_header_t *decompressed_block = NULL;
 
 	ret = (int)ReadBlockData(nffile, &block);
 	
@@ -1156,22 +1228,31 @@ data_block_header_t *block = NULL;
 		return ret;
 	}
 
-	ret = (int)DecompressBlock(nffile, &block);
+	ret = (int)DecompressBlock(FILE_COMPRESSION(nffile), block, &decompressed_block);
+    free(block);
 
 	if (ret < 0) {
-		free(block);
+		free(decompressed_block);
 		return ret;
 	}
 
-	memcpy(nffile->block_header, block, ret);
+	memcpy(nffile->block_header, decompressed_block, ret);
 
-	free(block);
+	free(decompressed_block);
 
 	return ret;
 } // End of ReadBlock
 
 
-int CompressLzo(data_block_header_t *in_block, data_block_header_t **out_block) {
+/**
+ * Compresses datablock with LZO 1x compression.
+ * \param in_block Pointer to block that is to be compressed
+ * \param out_block Address of pointer to block that will contain compressed data.
+ *                  This pointer will be allocated and becomes the responsibility of
+ *                  the caller in case the function returns successfuly.
+ * \return 0 on success, NF_ERROR otherwise
+ */
+int CompressLzo(const data_block_header_t *in_block, data_block_header_t **out_block) {
 lzo_bytep in;
 lzo_bytep out;
 lzo_uint in_len;
@@ -1196,13 +1277,23 @@ int ret;
         free(*out_block);
         *out_block = NULL;
 		LogError("LZO compression failed: %d" , ret);
-		return -2;
+		return NF_ERROR;
 	}
     (*out_block)->size = out_len;
     return 0;
 }
 
-int CompressBz2(data_block_header_t *in_block, data_block_header_t **out_block) {
+/**
+ * Compresses datablock with BZ2 compression.
+ * BZ2 compression compresses to about half the size of (the default) LZO compression,
+ * but decompression is fairly slow.
+ * \param in_block Pointer to block that is to be compressed
+ * \param out_block Address of pointer to block that will contain compressed data.
+ *                  This pointer will be allocated and becomes the responsibility of
+ *                  the caller in case the function returns successfuly.
+ * \return 0 on success, NF_ERROR otherwise
+ */
+int CompressBz2(const data_block_header_t *in_block, data_block_header_t **out_block) {
 #ifdef HAVE_LIBBZ2
 lzo_uint in_len;
 lzo_uint out_len;
@@ -1231,7 +1322,7 @@ int ret;
 			*out_block = NULL;
 			LogError("BZ2 compression failed: %d" , ret);
 			BZ2_bzCompressEnd (&bs);
-			return -2;
+			return NF_ERROR;
 		}
 		break;
 	}
@@ -1246,7 +1337,17 @@ int ret;
 }
 
 
-int CompressLz4(data_block_header_t *in_block, data_block_header_t **out_block) {
+/**
+ * Compresses datablock with LZ4 compression.
+ * LZ4 compression compresses about 5% worse than (the default) LZO compression,
+ * but compression is upto 20% faster and decompression is around 40% faster.
+ * \param in_block Pointer to block that is to be compressed
+ * \param out_block Address of pointer to block that will contain compressed data.
+ *                  This pointer will be allocated and becomes the responsibility of
+ *                  the caller in case the function returns successfuly.
+ * \return 0 on success, NF_ERROR otherwise
+ */
+int CompressLz4(const data_block_header_t *in_block, data_block_header_t **out_block) {
 char* in;
 char* out;
 size_t in_len;
@@ -1266,14 +1367,24 @@ int ret;
         free(*out_block);
         *out_block = NULL;
 		LogError("LZ4 compression failed: %d" , ret);
-		return -2;
+		return NF_ERROR;
 	}
     (*out_block)->size = ret;
     return 0;
 }
 
 
-int CompressLzma(data_block_header_t *in_block, data_block_header_t **out_block) {
+/**
+ * Compresses datablock with LZ4 compression.
+ * LZMA compression compresses slightly better than BZ2, but has much faster
+ * decompression at the expense of very slow compression
+ * \param in_block Pointer to block that is to be compressed
+ * \param out_block Address of pointer to block that will contain compressed data.
+ *                  This pointer will be allocated and becomes the responsibility of
+ *                  the caller in case the function returns successfuly.
+ * \return 0 on success, NF_ERROR otherwise
+ */
+int CompressLzma(const data_block_header_t *in_block, data_block_header_t **out_block) {
 #ifdef HAVE_LIBLZMA
 unsigned char* in;
 unsigned char* out;
@@ -1305,7 +1416,7 @@ int ret;
         free(*out_block);
         *out_block = NULL;
 		LogError("LZMA compression failed: %d" , ret);
-		return -2;
+		return NF_ERROR;
 	}
     (*out_block)->size = out_pos;
 	return 0;
@@ -1669,10 +1780,10 @@ int fd, ret;
  * Therefore, the conversion rearranges the v1 layout into v2 layout
  *
  * old record size = new record size = 36bytes + x, where x is the sum of
- * IP address block (IPv4 or IPv6) + packet counter + byte counter ( 4/8 bytes) 
+ * IP address block (IPv4 or IPv6) + packet counter + byte counter ( 4/8 bytes)
  *
  * v1											v2
- * 
+ *
  *  0 uint32_t    flags;						uint16_t	type; 	
  *												uint16_t	size;
  *
