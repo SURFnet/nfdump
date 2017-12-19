@@ -62,7 +62,7 @@ rm -f test.flows test2.out
 ./nfdump -q -r test.flows -o raw > test2.out
 diff -u test2.out nfdump.test.out
 
-rm -r test1.out test2.out
+rm -f test1.out test2.out
 
 # create tmp dir for flow replay
 if [ -d tmp ]; then

@@ -93,6 +93,8 @@
 /bin/test-suite.log
 /bin/test.sh.log
 /bin/test.sh.trs
+/bin/test*.flows
+/bin/anon.flows
 
 
 # Generated docs
