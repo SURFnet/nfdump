@@ -521,6 +521,13 @@ int 			fd, flags;
 				return NULL;
 			}
 			break;
+		case LZMA_COMPRESSED:
+			flags = FLAG_LZMA_COMPRESSED;
+			if ( !lzma_initialized && !LZMA_initialize() ) {
+				LogError("Failed to initialize LZMA compression");
+				return NULL;
+			}
+			break;
 		default:
 			LogError("Unknown compression ID: %i\n", compress);
 			return NULL;
@@ -967,7 +974,6 @@ size_t new_len = sizeof(data_block_header_t) + BUFFSIZE;
 }
 
 ssize_t DecompressLzma(data_block_header_t *in_block, data_block_header_t **out_block) {
-	return (*out_block)->size + sizeof(data_block_header_t);
 #ifdef HAVE_LIBLZMA
 int ret;
 uint64_t mem_limit = 0x04000000;
@@ -1272,16 +1278,18 @@ int CompressLzma(data_block_header_t *in_block, data_block_header_t **out_block)
 unsigned char* in;
 unsigned char* out;
 size_t in_len;
-size_t out_pos;
+size_t out_len;
+size_t out_pos = sizeof(data_block_header_t);
 int ret;
 
 	in_len = (size_t)in_block->size;
-	*out_block = (data_block_header_t *)malloc(LZMA_BUFFSIZE(in_len));
+	out_len = LZMA_BUFFSIZE(in_len);
+	*out_block = (data_block_header_t *)malloc(out_len);
 	// Copy the header
 	**out_block = *in_block;
 
 	in = (unsigned char*)((pointer_addr_t)in_block + sizeof(data_block_header_t));	
-	out = (unsigned char*)((pointer_addr_t)*out_block + sizeof(data_block_header_t));	
+	out = (unsigned char*)*out_block;
 
 	ret = lzma_easy_buffer_encode(
 			lzma_preset,       // preset: high values are expensive and don't bring much
@@ -1291,7 +1299,7 @@ int ret;
 			in_len,
 			out,
 			&out_pos,
-			BUFFSIZE);
+			out_len);
     
 	if (ret != LZMA_OK) {
         free(*out_block);
@@ -1414,7 +1422,7 @@ void		*p = (void *)input_record;
 
 } // End of ExpandRecord_v1
 
-void ModifyCompressFile(char * rfile, char *Rfile, int compress) {
+int ModifyCompressFile(char * rfile, char *Rfile, int compress) {
 int 			i, anonymized, compression;
 ssize_t			ret;
 nffile_t		*nffile_r, *nffile_w;
@@ -1455,7 +1463,7 @@ void			*tmp;
 		if ( !nffile_w ) {
 			CloseFile(nffile_r);
 			DisposeFile(nffile_r);
-			break;;
+			return NF_ERROR;
 		}
 
 		// Use same buffer for read/write
@@ -1471,6 +1479,7 @@ void			*tmp;
 		for ( i=0; i < nffile_r->file_header->NumBlocks; i++ ) {
 			ret = ReadBlock(nffile_r);
 			if ( ret < 0 ) {
+				ret = NF_ERROR;
 				LogError("Error while reading data block. Abort.\n");
 				nffile_r->block_header = tmp;
 				CloseFile(nffile_r);
@@ -1478,9 +1487,10 @@ void			*tmp;
 				CloseFile(nffile_w);
 				DisposeFile(nffile_w);
 				unlink(outfile);
-				break;;
+				return NF_ERROR;
 			}
 			if ( WriteBlock(nffile_w) <= 0 ) {
+				ret = NF_ERROR;
 				LogError("Failed to write output buffer to disk: '%s'" , strerror(errno));
 				nffile_r->block_header = tmp;
 				CloseFile(nffile_r);
@@ -1488,7 +1498,7 @@ void			*tmp;
 				CloseFile(nffile_w);
 				DisposeFile(nffile_w);
 				unlink(outfile);
-				break;;
+				return NF_ERROR;
 			}
 		}
 
@@ -1503,6 +1513,7 @@ void			*tmp;
 
 		DisposeFile(nffile_w);
 	}
+	return 0;
 
 } // End of ModifyCompressFile
 

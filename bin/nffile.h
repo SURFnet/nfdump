@@ -2208,7 +2208,7 @@ int WriteBlock(nffile_t *nffile);
 
 int RenameAppend(char *from, char *to);
 
-void ModifyCompressFile(char * rfile, char *Rfile, int compress);
+int ModifyCompressFile(char * rfile, char *Rfile, int compress);
 
 void ExpandRecord_v1(common_record_t *input_record,master_record_t *output_record );
 
