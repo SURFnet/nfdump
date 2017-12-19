@@ -367,8 +367,15 @@ AC_CHECK_LIB(socket, res_search, [
 ])
 
 AC_CHECK_LIB(bz2, BZ2_bzCompressInit, [
- LIBS="$LIBS -lbz2"
- ], [])
+  LIBS="$LIBS -lbz2"
+ ], [
+  AC_MSG_WARN(["BZ2 library not found. BZ2 (de)compression will not be available"])
+ ]
+)
+AC_CHECK_LIB(lzma, lzma_easy_buffer_encode, [], [
+  AC_MSG_WARN(["LZMA library not found. LZMA (de)compression will not be available"])
+ ]
+)
 
 # lzo compression requirements
 AC_CHECK_TYPE(ptrdiff_t, long)
