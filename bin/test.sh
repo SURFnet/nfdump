@@ -41,23 +41,40 @@ TZ=MET
 export TZ
 
 # Check for correct output
-./nfgen | ./nfdump -q -o raw  > test1.out
+./nfgen | ./nfdump -q -o raw  > test1.out || exit 1
 diff -u test1.out nfdump.test.out
 
 # compressed flow test
-./nfgen | ./nfdump -z -q -w  test.flows
-./nfdump -q -r test.flows -o raw > test2.out
+./nfgen | ./nfdump -z -q -w  test.flows || exit 1
+./nfdump -q -r test.flows -o raw > test2.out || exit 1
 diff -u test2.out nfdump.test.out
 
-./nfdump -q -r test.flows -O tstart -o raw > test3.out
+./nfdump -q -r test.flows -O tstart -o raw > test3.out || exit 1
 diff -u test3.out nfdump.test.out
 
-./nfdump -r test.flows -O tstart -z -w test2.flows
-./nfdump -q -r test2.flows -o raw > test4.out
+./nfdump -r test.flows -O tstart -z -w test2.flows || exit 1
+./nfdump -q -r test2.flows -o raw > test4.out || exit 1
 diff -u test4.out nfdump.test.out
 
+# BZ2
+cp test.flows test_bz2.flows
+./nfdump -J 2 -r test_bz2.flows || exit 1
+./nfdump -r test_bz2.flows -q -o raw > test1.out || exit 1
+diff -u test1.out nfdump.test.out
+# LZ4
+cp test.flows test_lz4.flows
+./nfdump -J 3 -r test_lz4.flows || exit 1
+./nfdump -r test_lz4.flows -q -o raw > test1.out || exit 1
+diff -u test1.out nfdump.test.out
+# LZMA
+cp test.flows test_lzma.flows
+./nfdump -J 4 -r test_lzma.flows || exit 1
+./nfdump -r test_lzma.flows -q -o raw > test1.out || exit 1
+diff -u test1.out nfdump.test.out
+
+rm -f test.flows test1.out test2.out
+
 # uncompressed flow test
-rm -f test.flows test2.out
 ./nfgen | ./nfdump -q -w  test.flows
 ./nfdump -q -r test.flows -o raw > test2.out
 diff -u test2.out nfdump.test.out
@@ -116,10 +133,6 @@ export MallocCorruptionAbort=1
 ./nfdump -r test.flows -O tstart -w test-2.flows 'host  172.16.14.18'
 ./nfanon -K abcdefghijklmnopqrstuvwxyz012345 -r test.flows -w anon.flows
 ./nfdump -J 0 -r test.flows
-./nfdump -J 1 -r test.flows
-./nfdump -J 2 -r test.flows
-./nfdump -J 3 -r test.flows
-./nfdump -J 2 -r test.flows
 ./nfdump -J 1 -r test.flows
 ./nfdump -J 0 -r test.flows
 ./nfdump -q -r test.flows -o raw > test2.out
