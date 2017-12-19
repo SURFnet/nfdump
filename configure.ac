@@ -317,10 +317,6 @@ AC_CHECK_HEADERS(sys/types.h netinet/in.h arpa/nameser.h arpa/nameser_compat.h n
 #  include <netdb.h>
 #endif]])
 
-AC_CHECK_HEADERS([bzlib.h])
-if test "$ac_cv_header_bzlib_h" = no; then
-	AC_MSG_ERROR(Required bzlib.h header file not found!)
-fi
 
 if test "$ac_cv_header_fts_h" != yes; then
 	FTS_OBJ=fts_compat.o
