@@ -966,14 +966,12 @@ char 		Ident[IDENTLEN];
 			LogError("Expected -r <file> or -R <dir> to change compression\n");
 			exit(255);
 		}
-		ModifyCompressFile(rfile, Rfile, ModifyCompress);
-		exit(0);
+		exit(ModifyCompressFile(rfile, Rfile, ModifyCompress));
 	}
 
 	// Change Ident only
 	if ( rfile && strlen(Ident) > 0 ) {
-		ChangeIdent(rfile, Ident);
-		exit(0);
+		exit(ChangeIdent(rfile, Ident));
 	}
 
 	if ( (element_stat || flow_stat) && (topN == -1)  ) 
