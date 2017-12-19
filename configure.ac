@@ -362,9 +362,7 @@ AC_CHECK_LIB(socket, res_search, [
  ]) 
 ])
 
-AC_CHECK_LIB(bz2, BZ2_bzCompressInit, [
-  LIBS="$LIBS -lbz2"
- ], [
+AC_CHECK_LIB(bz2, BZ2_bzCompressInit, [], [
   AC_MSG_WARN(["BZ2 library not found. BZ2 (de)compression will not be available"])
  ]
 )
