@@ -1,5 +1,11 @@
-/*
+// vi: noexpandtab tabstop=4 shiftwidth=4:
+/**
+ * \file
+ * Main program for the nfdump tool
+ *
+ * \copyright
  *  Copyright (c) 2017, Peter Haag
+ *  Copyright (c) 2017, SURFnet
  *  Copyright (c) 2014, Peter Haag
  *  Copyright (c) 2009, Peter Haag
  *  Copyright (c) 2004-2008, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
@@ -257,8 +263,10 @@ static void usage(char *name);
 
 static void PrintSummary(stat_record_t *stat_record, int plain_numbers, int csv_output);
 
+static stat_record_t process_block(data_block_header_t *block, int element_stat, int flow_stat, int sort_flows,
+	printer_t print_record, time_t twin_start, time_t twin_end);
 static stat_record_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
-	printer_t print_header, printer_t print_record, time_t twin_start, time_t twin_end, 
+	printer_t print_record, time_t twin_start, time_t twin_end, 
 	uint64_t limitflows, int tag, int compress);
 
 /* Functions */
@@ -364,8 +372,212 @@ char 		bps_str[NUMBER_STRING_SIZE], pps_str[NUMBER_STRING_SIZE], bpp_str[NUMBER_
 
 } // End of PrintSummary
 
+stat_record_t process_block(data_block_header_t *block, int element_stat, int flow_stat, int sort_flows,
+	printer_t print_record, time_t twin_start, time_t twin_end)
+{
+#ifdef COMPAT15
+	if ( nffile_r->block_header->id == DATA_BLOCK_TYPE_1 ) {
+		common_record_v1_t *v1_record = (common_record_v1_t *)nffile_r->buff_ptr;
+		// create an extension map for v1 blocks
+		if ( v1_map_done == 0 ) {
+			extension_map_t *map = malloc(sizeof(extension_map_t) + 2 * sizeof(uint16_t) );
+			if ( ! map ) {
+				LogError("malloc() allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+				exit(255);
+			}
+			map->type 	= ExtensionMapType;
+			map->size 	= sizeof(extension_map_t) + 2 * sizeof(uint16_t);
+			if (( map->size & 0x3 ) != 0 ) {
+				map->size += 4 - ( map->size & 0x3 );
+			}
+
+			map->map_id = INIT_ID;
+
+			map->ex_id[0]  = EX_IO_SNMP_2;
+			map->ex_id[1]  = EX_AS_2;
+			map->ex_id[2]  = 0;
+			
+			map->extension_size  = 0;
+			map->extension_size += extension_descriptor[EX_IO_SNMP_2].size;
+			map->extension_size += extension_descriptor[EX_AS_2].size;
+
+			if ( Insert_Extension_Map(extension_map_list,map) && write_file ) {
+				// flush new map
+				AppendToBuffer(nffile_w, (void *)map, map->size);
+			} // else map already known and flushed
+
+			v1_map_done = 1;
+		}
+
+		// convert the records to v2
+		for ( i=0; i < nffile_r->block_header->NumRecords; i++ ) {
+			common_record_t *v2_record = (common_record_t *)v1_record;
+			Convert_v1_to_v2((void *)v1_record);
+			// now we have a v2 record -> use size of v2_record->size
+			v1_record = (common_record_v1_t *)((pointer_addr_t)v1_record + v2_record->size);
+		}
+		nffile_r->block_header->id = DATA_BLOCK_TYPE_2;
+	}
+#endif
+
+	if ( nffile_r->block_header->id == Large_BLOCK_Type ) {
+		// skip
+		printf("Xstat block skipped ...\n");
+		continue;
+	}
+
+	if ( nffile_r->block_header->id != DATA_BLOCK_TYPE_2 ) {
+		if ( nffile_r->block_header->id == DATA_BLOCK_TYPE_1 ) {
+			LogError("Can't process nfdump 1.5.x block type 1. Add --enable-compat15 to compile compatibility code. Skip block.\n");
+		} else {
+			LogError("Can't process block type %u. Skip block.\n", nffile_r->block_header->id);
+		}
+		skipped_blocks++;
+		continue;
+	}
+
+	record_ptr = nffile_r->buff_ptr;
+	for ( i=0; i < nffile_r->block_header->NumRecords; i++ ) {
+		flow_record = record_ptr;
+		switch ( record_ptr->type ) {
+			case CommonRecordV0Type: 
+				// convert common record v0
+				if ( !ConvertBuffer ) {
+					ConvertBuffer = malloc(65536);
+					if ( !ConvertBuffer ) {
+						LogError("malloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
+						exit(255);
+					}
+				}
+				ConvertCommonV0((void *)record_ptr, (common_record_t *)ConvertBuffer);
+				flow_record = (common_record_t *)ConvertBuffer;
+				dbg_printf("Converted type %u to %u record\n", CommonRecordV0Type, CommonRecordType);
+			case CommonRecordType: {
+				int match;
+				uint32_t map_id;
+				generic_exporter_t *exp_info;
+
+				// valid flow_record converted if needed
+				map_id = flow_record->ext_map;
+				exp_info = exporter_list[flow_record->exporter_sysid];
+
+				if ( map_id >= MAX_EXTENSION_MAPS ) {
+					LogError("Corrupt data file. Extension map id %u too big.\n", flow_record->ext_map);
+					exit(255);
+				}
+				if ( extension_map_list->slot[map_id] == NULL ) {
+					LogError("Corrupt data file. Missing extension map %u. Skip record.\n", flow_record->ext_map);
+					record_ptr = (common_record_t *)((pointer_addr_t)record_ptr + record_ptr->size);	
+					continue;
+				} 
+
+				total_flows++;
+				master_record = &(extension_map_list->slot[map_id]->master_record);
+				Engine->nfrecord = (uint64_t *)master_record;
+				ExpandRecord_v2( flow_record, extension_map_list->slot[map_id], 
+					exp_info ? &(exp_info->info) : NULL, master_record);
+
+				// Time based filter
+				// if no time filter is given, the result is always true
+				match  = twin_start && (master_record->first < twin_start || master_record->last > twin_end) ? 0 : 1;
+				match &= limitflows ? stat_record.numflows < limitflows : 1;
+
+				// filter netflow record with user supplied filter
+				if ( match ) 
+					match = (*Engine->FilterEngine)(Engine);
+
+				if ( match == 0 ) { // record failed to pass all filters
+					// increment pointer by number of bytes for netflow record
+					record_ptr = (common_record_t *)((pointer_addr_t)record_ptr + record_ptr->size);	
+					// go to next record
+					continue;
+				}
+
+				// Records passed filter -> continue record processing
+				// Update statistics
+				UpdateStat(&stat_record, master_record);
+
+				// update number of flows matching a given map
+				extension_map_list->slot[map_id]->ref_count++;
+
+				if ( flow_stat ) {
+					AddFlow(flow_record, master_record, extension_map_list->slot[map_id]);
+					if ( element_stat ) {
+						AddStat(flow_record, master_record);
+					} 
+				} else if ( element_stat ) {
+					AddStat(flow_record, master_record);
+				} else if ( sort_flows ) {
+					InsertFlow(flow_record, master_record, extension_map_list->slot[map_id]);
+				} else {
+					if ( write_file ) {
+						AppendToBuffer(nffile_w, (void *)flow_record, flow_record->size);
+					} else if ( print_record ) {
+						char *string;
+						// if we need to print out this record
+						print_record(master_record, &string, tag);
+						if ( string ) {
+							if ( limitflows ) {
+								if ( (stat_record.numflows <= limitflows) )
+									printf("%s\n", string);
+							} else 
+								printf("%s\n", string);
+						}
+					} else { 
+						// mutually exclusive conditions should prevent executing this code
+						// this is buggy!
+						printf("Bug! - this code should never get executed in file %s line %d\n", __FILE__, __LINE__);
+					}
+				} // sort_flows - else
+				} break; 
+			case ExtensionMapType: {
+				extension_map_t *map = (extension_map_t *)record_ptr;
+
+				if ( Insert_Extension_Map(extension_map_list, map) && write_file ) {
+					// flush new map
+					AppendToBuffer(nffile_w, (void *)map, map->size);
+				} // else map already known and flushed
+				} break;
+			case ExporterRecordType:
+			case SamplerRecordype:
+					// Silently skip exporter records
+				break;
+			case ExporterInfoRecordType: {
+				int ret = AddExporterInfo((exporter_info_record_t *)record_ptr);
+				if ( ret != 0 ) {
+					if ( write_file && ret == 1 ) 
+						AppendToBuffer(nffile_w, (void *)record_ptr, record_ptr->size);
+				} else {
+					LogError("Failed to add Exporter Record\n");
+				}
+				} break;
+			case ExporterStatRecordType:
+				AddExporterStat((exporter_stats_record_t *)record_ptr);
+				break;
+			case SamplerInfoRecordype: {
+				int ret = AddSamplerInfo((sampler_info_record_t *)record_ptr);
+				if ( ret != 0 ) {
+					if ( write_file && ret == 1 ) 
+						AppendToBuffer(nffile_w, (void *)flow_record, flow_record->size);
+				} else {
+					LogError("Failed to add Sampler Record\n");
+				}
+				} break;
+			default: {
+				LogError("Skip unknown record type %i\n", record_ptr->type);
+			}
+		}
+
+		// Advance pointer by number of bytes for netflow record
+		record_ptr = (common_record_t *)((pointer_addr_t)record_ptr + record_ptr->size);	
+
+
+	} // for all records
+
+}
+
 stat_record_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
-	printer_t print_header, printer_t print_record, time_t twin_start, time_t twin_end, 
+	printer_t print_record, time_t twin_start, time_t twin_end, 
 	uint64_t limitflows, int tag, int compress) {
 common_record_t 	*flow_record, *record_ptr;
 master_record_t		*master_record;
@@ -449,7 +661,7 @@ int	v1_map_done = 0;
 				else 
 					LogError("Read error in file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
 				// fall through - get next file in chain
-			case NF_EOF: {
+			case NF_EOF:
 				nffile_t *next = GetNextFile(nffile_r, twin_start, twin_end);
 				if ( next == EMPTY_LIST ) {
 					done = 1;
@@ -462,215 +674,23 @@ int	v1_map_done = 0;
 						t_first_flow = next->stat_record->first_seen;
 					if ( next->stat_record->last_seen > t_last_flow ) 
 						t_last_flow = next->stat_record->last_seen;
-					// continue with next file
 				}
+				// Continue with next file
 				continue;
-
-				} break; // not really needed
 			default:
 				// successfully read block
 				total_bytes += ret;
 		}
 
-
-#ifdef COMPAT15
-		if ( nffile_r->block_header->id == DATA_BLOCK_TYPE_1 ) {
-			common_record_v1_t *v1_record = (common_record_v1_t *)nffile_r->buff_ptr;
-			// create an extension map for v1 blocks
-			if ( v1_map_done == 0 ) {
-				extension_map_t *map = malloc(sizeof(extension_map_t) + 2 * sizeof(uint16_t) );
-				if ( ! map ) {
-					LogError("malloc() allocation error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
-					exit(255);
-				}
-				map->type 	= ExtensionMapType;
-				map->size 	= sizeof(extension_map_t) + 2 * sizeof(uint16_t);
-				if (( map->size & 0x3 ) != 0 ) {
-					map->size += 4 - ( map->size & 0x3 );
-				}
-
-				map->map_id = INIT_ID;
-
-				map->ex_id[0]  = EX_IO_SNMP_2;
-				map->ex_id[1]  = EX_AS_2;
-				map->ex_id[2]  = 0;
-				
-				map->extension_size  = 0;
-				map->extension_size += extension_descriptor[EX_IO_SNMP_2].size;
-				map->extension_size += extension_descriptor[EX_AS_2].size;
-
-				if ( Insert_Extension_Map(extension_map_list,map) && write_file ) {
-					// flush new map
-					AppendToBuffer(nffile_w, (void *)map, map->size);
-				} // else map already known and flushed
-
-				v1_map_done = 1;
-			}
-
-			// convert the records to v2
-			for ( i=0; i < nffile_r->block_header->NumRecords; i++ ) {
-				common_record_t *v2_record = (common_record_t *)v1_record;
-				Convert_v1_to_v2((void *)v1_record);
-				// now we have a v2 record -> use size of v2_record->size
-				v1_record = (common_record_v1_t *)((pointer_addr_t)v1_record + v2_record->size);
-			}
-			nffile_r->block_header->id = DATA_BLOCK_TYPE_2;
-		}
-#endif
-
-		if ( nffile_r->block_header->id == Large_BLOCK_Type ) {
-			// skip
-			printf("Xstat block skipped ...\n");
-			continue;
-		}
-
-		if ( nffile_r->block_header->id != DATA_BLOCK_TYPE_2 ) {
-			if ( nffile_r->block_header->id == DATA_BLOCK_TYPE_1 ) {
-				LogError("Can't process nfdump 1.5.x block type 1. Add --enable-compat15 to compile compatibility code. Skip block.\n");
-			} else {
-				LogError("Can't process block type %u. Skip block.\n", nffile_r->block_header->id);
-			}
-			skipped_blocks++;
-			continue;
-		}
-
-		record_ptr = nffile_r->buff_ptr;
-		for ( i=0; i < nffile_r->block_header->NumRecords; i++ ) {
-			flow_record = record_ptr;
-			switch ( record_ptr->type ) {
-				case CommonRecordV0Type: 
-					// convert common record v0
-					if ( !ConvertBuffer ) {
-						ConvertBuffer = malloc(65536);
-						if ( !ConvertBuffer ) {
-							LogError("malloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
-							exit(255);
-						}
-					}
-					ConvertCommonV0((void *)record_ptr, (common_record_t *)ConvertBuffer);
-					flow_record = (common_record_t *)ConvertBuffer;
-					dbg_printf("Converted type %u to %u record\n", CommonRecordV0Type, CommonRecordType);
-				case CommonRecordType: {
-					int match;
-					uint32_t map_id;
-					generic_exporter_t *exp_info;
-
-					// valid flow_record converted if needed
-					map_id = flow_record->ext_map;
-					exp_info = exporter_list[flow_record->exporter_sysid];
-
-					if ( map_id >= MAX_EXTENSION_MAPS ) {
-						LogError("Corrupt data file. Extension map id %u too big.\n", flow_record->ext_map);
-						exit(255);
-					}
-					if ( extension_map_list->slot[map_id] == NULL ) {
-						LogError("Corrupt data file. Missing extension map %u. Skip record.\n", flow_record->ext_map);
-						record_ptr = (common_record_t *)((pointer_addr_t)record_ptr + record_ptr->size);	
-						continue;
-					} 
-
-					total_flows++;
-					master_record = &(extension_map_list->slot[map_id]->master_record);
-					Engine->nfrecord = (uint64_t *)master_record;
-					ExpandRecord_v2( flow_record, extension_map_list->slot[map_id], 
-						exp_info ? &(exp_info->info) : NULL, master_record);
-
-					// Time based filter
-					// if no time filter is given, the result is always true
-					match  = twin_start && (master_record->first < twin_start || master_record->last > twin_end) ? 0 : 1;
-					match &= limitflows ? stat_record.numflows < limitflows : 1;
-
-					// filter netflow record with user supplied filter
-					if ( match ) 
-						match = (*Engine->FilterEngine)(Engine);
-	
-					if ( match == 0 ) { // record failed to pass all filters
-						// increment pointer by number of bytes for netflow record
-						record_ptr = (common_record_t *)((pointer_addr_t)record_ptr + record_ptr->size);	
-						// go to next record
-						continue;
-					}
-
-					// Records passed filter -> continue record processing
-					// Update statistics
-					UpdateStat(&stat_record, master_record);
-
-					// update number of flows matching a given map
-					extension_map_list->slot[map_id]->ref_count++;
-	
-					if ( flow_stat ) {
-						AddFlow(flow_record, master_record, extension_map_list->slot[map_id]);
-						if ( element_stat ) {
-							AddStat(flow_record, master_record);
-						} 
-					} else if ( element_stat ) {
-						AddStat(flow_record, master_record);
-					} else if ( sort_flows ) {
-						InsertFlow(flow_record, master_record, extension_map_list->slot[map_id]);
-					} else {
-						if ( write_file ) {
-							AppendToBuffer(nffile_w, (void *)flow_record, flow_record->size);
-						} else if ( print_record ) {
-							char *string;
-							// if we need to print out this record
-							print_record(master_record, &string, tag);
-							if ( string ) {
-								if ( limitflows ) {
-									if ( (stat_record.numflows <= limitflows) )
-										printf("%s\n", string);
-								} else 
-									printf("%s\n", string);
-							}
-						} else { 
-							// mutually exclusive conditions should prevent executing this code
-							// this is buggy!
-							printf("Bug! - this code should never get executed in file %s line %d\n", __FILE__, __LINE__);
-						}
-					} // sort_flows - else
-					} break; 
-				case ExtensionMapType: {
-					extension_map_t *map = (extension_map_t *)record_ptr;
-	
-					if ( Insert_Extension_Map(extension_map_list, map) && write_file ) {
-						// flush new map
-						AppendToBuffer(nffile_w, (void *)map, map->size);
-					} // else map already known and flushed
-					} break;
-				case ExporterRecordType:
-				case SamplerRecordype:
-						// Silently skip exporter records
-					break;
-				case ExporterInfoRecordType: {
-					int ret = AddExporterInfo((exporter_info_record_t *)record_ptr);
-					if ( ret != 0 ) {
-						if ( write_file && ret == 1 ) 
-							AppendToBuffer(nffile_w, (void *)record_ptr, record_ptr->size);
-					} else {
-						LogError("Failed to add Exporter Record\n");
-					}
-					} break;
-				case ExporterStatRecordType:
-					AddExporterStat((exporter_stats_record_t *)record_ptr);
-					break;
-				case SamplerInfoRecordype: {
-					int ret = AddSamplerInfo((sampler_info_record_t *)record_ptr);
-					if ( ret != 0 ) {
-						if ( write_file && ret == 1 ) 
-							AppendToBuffer(nffile_w, (void *)flow_record, flow_record->size);
-					} else {
-						LogError("Failed to add Sampler Record\n");
-					}
-					} break;
-				default: {
-					LogError("Skip unknown record type %i\n", record_ptr->type);
-				}
-			}
-
-		// Advance pointer by number of bytes for netflow record
-		record_ptr = (common_record_t *)((pointer_addr_t)record_ptr + record_ptr->size);	
-
-
-		} // for all records
+		process_block(
+				nffile_r->block_header, 
+				element_stat, 
+				flow_stat, 
+				sort_flows,
+                print_record, 
+				twin_start, 
+				twin_end
+		);
 
 		// check if we are done, due to -c option 
 		if ( limitflows ) 
@@ -1195,7 +1215,7 @@ char 		Ident[IDENTLEN];
 
 	nfprof_start(&profile_data);
 	sum_stat = process_data(wfile, element_stat, aggregate || flow_stat, print_order != NULL,
-						print_header, print_record, t_start, t_end, 
+						print_record, t_start, t_end, 
 						limitflows, do_tag, compress);
 	nfprof_end(&profile_data, total_flows);
 
