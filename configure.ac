@@ -28,7 +28,7 @@ AC_ARG_ENABLE(devel,
 
 # Which way is better?
 if test "${enable_devel}" = "yes" ; then
-	CFLAGS="$CFLAGS -DDEVEL"
+	CFLAGS="$CFLAGS -DDEVEL -ggdb"
 cat >>config.h <<_ACEOF
 #define dbg_printf(...) printf(__VA_ARGS__)
 _ACEOF
