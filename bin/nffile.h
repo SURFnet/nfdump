@@ -5,6 +5,7 @@
  *
  * \copyright
  *  Copyright (c) 2017, Peter Haag
+ *  Copyright (c) 2017, SURFnet
  *  Copyright (c) 2014, Peter Haag
  *  Copyright (c) 2009, Peter Haag
  *  Copyright (c) 2008, SWITCH - Teleinformatikdienste fuer Lehre und Forschung
