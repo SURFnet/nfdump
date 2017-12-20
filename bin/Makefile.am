@@ -29,8 +29,7 @@ AM_YFLAGS = -d
 AM_CPPFLAGS = $(DEPS_CFLAGS)
 LDADD = $(DEPS_LIBS)
 
-#Add extra debug info for gdb
-AM_CFLAGS = -ggdb 
+AM_CFLAGS = $(OPENMP_CFLAGS)
 
 # libnfdump sources
 common =  nf_common.c nf_common.h 
