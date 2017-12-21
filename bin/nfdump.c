@@ -258,16 +258,54 @@ printmap_t printmap[] = {
 // compare at most 16 chars
 #define MAXMODELEN	16	
 
+typedef struct {
+	int aggregate; 
+	int aggregate_mask;
+	int	print_stat; 
+	int syntax_only; 
+	int date_sorted; 
+	int do_tag; 
+	int compress;
+	int modify_compress;
+	int flow_stat;
+	int element_stat;
+	int topN;
+	int limit_flows;
+	int sort_flows;
+	time_t t_start;
+	time_t t_end;
+	char *aggr_fmt;
+	char *rfile;
+	char *Rfile;
+	char *wfile;
+    char *Mdirs; 
+	char *ffile;
+	char *print_order;
+	char *print_format;
+} options_t;
+
+static void free_options(options_t *options) {
+	if (options == NULL)
+		return;
+	free(options->aggr_fmt);
+	free(options->rfile);
+	free(options->Rfile);
+	free(options->wfile);
+	free(options->Mdirs);
+	free(options->ffile);
+	free(options->print_order);
+	free(options->print_format);
+	free(options);
+};
+
 /* Function Prototypes */
 static void usage(char *name);
 
 static void PrintSummary(stat_record_t *stat_record, int plain_numbers, int csv_output);
 
-static stat_record_t process_block(data_block_header_t *block, int element_stat, int flow_stat, int sort_flows,
-	printer_t print_record, time_t twin_start, time_t twin_end);
-static stat_record_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
-	printer_t print_record, time_t twin_start, time_t twin_end, 
-	uint64_t limitflows, int tag, int compress);
+static stat_record_t process_block(data_block_header_t *block, options_t *options, printer_t print_record);
+static stat_record_t process_data(options_t *options, printer_t print_record);
+
 
 /* Functions */
 
@@ -372,11 +410,17 @@ char 		bps_str[NUMBER_STRING_SIZE], pps_str[NUMBER_STRING_SIZE], bpp_str[NUMBER_
 
 } // End of PrintSummary
 
-stat_record_t process_block(data_block_header_t *block, int element_stat, int flow_stat, int sort_flows,
-	printer_t print_record, time_t twin_start, time_t twin_end)
+stat_record_t process_block(data_block_header_t *block, options_t *options, printer_t print_record)
 {
+stat_record_t 		stat_record;
+master_record_t		*master_record;
+common_record_t 	*flow_record, *record_ptr;
+char *ConvertBuffer = NULL;
+
+	memset((void *)&stat_record, 0, sizeof(stat_record_t));
+
 #ifdef COMPAT15
-	if ( nffile_r->block_header->id == DATA_BLOCK_TYPE_1 ) {
+	if ( block->id == DATA_BLOCK_TYPE_1 ) {
 		common_record_v1_t *v1_record = (common_record_v1_t *)nffile_r->buff_ptr;
 		// create an extension map for v1 blocks
 		if ( v1_map_done == 0 ) {
@@ -420,24 +464,24 @@ stat_record_t process_block(data_block_header_t *block, int element_stat, int fl
 	}
 #endif
 
-	if ( nffile_r->block_header->id == Large_BLOCK_Type ) {
+	if ( block->id == Large_BLOCK_Type ) {
 		// skip
 		printf("Xstat block skipped ...\n");
-		continue;
+		return stat_record;
 	}
 
-	if ( nffile_r->block_header->id != DATA_BLOCK_TYPE_2 ) {
-		if ( nffile_r->block_header->id == DATA_BLOCK_TYPE_1 ) {
+	if ( block->id != DATA_BLOCK_TYPE_2 ) {
+		if ( block->id == DATA_BLOCK_TYPE_1 ) {
 			LogError("Can't process nfdump 1.5.x block type 1. Add --enable-compat15 to compile compatibility code. Skip block.\n");
 		} else {
-			LogError("Can't process block type %u. Skip block.\n", nffile_r->block_header->id);
+			LogError("Can't process block type %u. Skip block.\n", block->id);
 		}
 		skipped_blocks++;
-		continue;
+		return stat_record;
 	}
 
-	record_ptr = nffile_r->buff_ptr;
-	for ( i=0; i < nffile_r->block_header->NumRecords; i++ ) {
+	record_ptr = (common_record_t*)block + sizeof(data_block_header_t);
+	for ( int i=0; i < block->NumRecords; i++ ) {
 		flow_record = record_ptr;
 		switch ( record_ptr->type ) {
 			case CommonRecordV0Type: 
@@ -479,8 +523,8 @@ stat_record_t process_block(data_block_header_t *block, int element_stat, int fl
 
 				// Time based filter
 				// if no time filter is given, the result is always true
-				match  = twin_start && (master_record->first < twin_start || master_record->last > twin_end) ? 0 : 1;
-				match &= limitflows ? stat_record.numflows < limitflows : 1;
+				match  = options->t_start && (master_record->first < options->t_start || master_record->last > options->t_end) ? 0 : 1;
+				match &= options->limit_flows ? stat_record.numflows < options->limit_flows : 1;
 
 				// filter netflow record with user supplied filter
 				if ( match ) 
@@ -500,25 +544,26 @@ stat_record_t process_block(data_block_header_t *block, int element_stat, int fl
 				// update number of flows matching a given map
 				extension_map_list->slot[map_id]->ref_count++;
 
-				if ( flow_stat ) {
+				if ( options->flow_stat ) {
 					AddFlow(flow_record, master_record, extension_map_list->slot[map_id]);
-					if ( element_stat ) {
+					if ( options->element_stat ) {
 						AddStat(flow_record, master_record);
 					} 
-				} else if ( element_stat ) {
+				} else if ( options->element_stat ) {
 					AddStat(flow_record, master_record);
-				} else if ( sort_flows ) {
+				} else if ( options->sort_flows ) {
 					InsertFlow(flow_record, master_record, extension_map_list->slot[map_id]);
 				} else {
-					if ( write_file ) {
-						AppendToBuffer(nffile_w, (void *)flow_record, flow_record->size);
-					} else if ( print_record ) {
+					//if ( write_file ) {
+					//	AppendToBuffer(nffile_w, (void *)flow_record, flow_record->size);
+					//} else 
+					if ( print_record ) {
 						char *string;
 						// if we need to print out this record
-						print_record(master_record, &string, tag);
+						print_record(master_record, &string, options->do_tag);
 						if ( string ) {
-							if ( limitflows ) {
-								if ( (stat_record.numflows <= limitflows) )
+							if ( options->limit_flows ) {
+								if ( (stat_record.numflows <= options->limit_flows) )
 									printf("%s\n", string);
 							} else 
 								printf("%s\n", string);
@@ -529,14 +574,15 @@ stat_record_t process_block(data_block_header_t *block, int element_stat, int fl
 						printf("Bug! - this code should never get executed in file %s line %d\n", __FILE__, __LINE__);
 					}
 				} // sort_flows - else
-				} break; 
+				}
+				break; 
 			case ExtensionMapType: {
-				extension_map_t *map = (extension_map_t *)record_ptr;
+				//extension_map_t *map = (extension_map_t *)record_ptr;
 
-				if ( Insert_Extension_Map(extension_map_list, map) && write_file ) {
+				//if ( Insert_Extension_Map(extension_map_list, map) && write_file ) {
 					// flush new map
-					AppendToBuffer(nffile_w, (void *)map, map->size);
-				} // else map already known and flushed
+			//		AppendToBuffer(nffile_w, (void *)map, map->size);
+				//} // else map already known and flushed
 				} break;
 			case ExporterRecordType:
 			case SamplerRecordype:
@@ -545,22 +591,24 @@ stat_record_t process_block(data_block_header_t *block, int element_stat, int fl
 			case ExporterInfoRecordType: {
 				int ret = AddExporterInfo((exporter_info_record_t *)record_ptr);
 				if ( ret != 0 ) {
-					if ( write_file && ret == 1 ) 
-						AppendToBuffer(nffile_w, (void *)record_ptr, record_ptr->size);
-				} else {
-					LogError("Failed to add Exporter Record\n");
+					//	if ( write_file && ret == 1 ) 
+					//		AppendToBuffer(nffile_w, (void *)record_ptr, record_ptr->size);
+					//} else {
+				//		LogError("Failed to add Exporter Record\n");
+				//	}
+					} 
 				}
-				} break;
+				break;
 			case ExporterStatRecordType:
 				AddExporterStat((exporter_stats_record_t *)record_ptr);
 				break;
 			case SamplerInfoRecordype: {
 				int ret = AddSamplerInfo((sampler_info_record_t *)record_ptr);
 				if ( ret != 0 ) {
-					if ( write_file && ret == 1 ) 
-						AppendToBuffer(nffile_w, (void *)flow_record, flow_record->size);
-				} else {
-					LogError("Failed to add Sampler Record\n");
+					///	if ( write_file && ret == 1 ) 
+				//			AppendToBuffer(nffile_w, (void *)flow_record, flow_record->size);
+				//	} else {
+				//		LogError("Failed to add Sampler Record\n");
 				}
 				} break;
 			default: {
@@ -573,14 +621,11 @@ stat_record_t process_block(data_block_header_t *block, int element_stat, int fl
 
 
 	} // for all records
-
+	free(ConvertBuffer);
+	return stat_record;
 }
 
-stat_record_t process_data(char *wfile, int element_stat, int flow_stat, int sort_flows,
-	printer_t print_record, time_t twin_start, time_t twin_end, 
-	uint64_t limitflows, int tag, int compress) {
-common_record_t 	*flow_record, *record_ptr;
-master_record_t		*master_record;
+stat_record_t process_data(options_t *options, printer_t print_record) {
 nffile_t			*nffile_w, *nffile_r;
 stat_record_t 		stat_record;
 int 				done, write_file;
@@ -597,18 +642,20 @@ int	v1_map_done = 0;
 	// Do the logic first
 
 	// do not print flows when doing any stats are sorting
-	if ( sort_flows || flow_stat || element_stat ) {
+	if ( options->sort_flows || options->flow_stat || options->element_stat ) {
 		print_record = NULL;
+		// do not write flows to file, when doing any stats
+		write_file = 0;
+	} else {
+		// -w may apply for flow_stats later
+		write_file = options->wfile != NULL;
 	}
 
-	// do not write flows to file, when doing any stats
-	// -w may apply for flow_stats later
-	write_file = !(sort_flows || flow_stat || element_stat) && wfile;
 	nffile_r = NULL;
 	nffile_w = NULL;
 
 	// Get the first file handle
-	nffile_r = GetNextFile(NULL, twin_start, twin_end);
+	nffile_r = GetNextFile(NULL, options->t_start, options->t_end);
 	if ( !nffile_r ) {
 		LogError("GetNextFile() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 		return stat_record;
@@ -631,7 +678,7 @@ int	v1_map_done = 0;
 
 	// prepare output file if requested
 	if ( write_file ) {
-		nffile_w = OpenNewFile(wfile, NULL, compress, IP_ANONYMIZED(nffile_r), NULL );
+		nffile_w = OpenNewFile(options->wfile, NULL, options->compress, IP_ANONYMIZED(nffile_r), NULL );
 		if ( !nffile_w ) {
 			if ( nffile_r ) {
 				CloseFile(nffile_r);
@@ -647,8 +694,7 @@ int	v1_map_done = 0;
 
 	done = 0;
 	while ( !done ) {
-	int i, ret;
-	char *ConvertBuffer = NULL;
+	int ret;
 
 		// get next data block from file
 		ret = ReadBlock(nffile_r);
@@ -661,8 +707,8 @@ int	v1_map_done = 0;
 				else 
 					LogError("Read error in file '%s': %s\n",GetCurrentFilename(), strerror(errno) );
 				// fall through - get next file in chain
-			case NF_EOF:
-				nffile_t *next = GetNextFile(nffile_r, twin_start, twin_end);
+			case NF_EOF: {
+				nffile_t *next = GetNextFile(nffile_r, options->t_start, options->t_end);
 				if ( next == EMPTY_LIST ) {
 					done = 1;
 				} else if ( next == NULL ) {
@@ -675,6 +721,7 @@ int	v1_map_done = 0;
 					if ( next->stat_record->last_seen > t_last_flow ) 
 						t_last_flow = next->stat_record->last_seen;
 				}
+				}
 				// Continue with next file
 				continue;
 			default:
@@ -684,17 +731,14 @@ int	v1_map_done = 0;
 
 		process_block(
 				nffile_r->block_header, 
-				element_stat, 
-				flow_stat, 
-				sort_flows,
-                print_record, 
-				twin_start, 
-				twin_end
+				options,
+				print_record
 		);
 
 		// check if we are done, due to -c option 
-		if ( limitflows ) 
-			done = stat_record.numflows >= limitflows;
+		if ( options->limit_flows ) {
+			done = stat_record.numflows >= options->limit_flows;
+		}
 
 	} // while
 
@@ -729,39 +773,28 @@ int	v1_map_done = 0;
 int main( int argc, char **argv ) {
 struct stat stat_buff;
 stat_record_t	sum_stat;
-printer_t 	print_header, print_record;
+printer_t 	print_record;
 nfprof_t 	profile_data;
-char 		*rfile, *Rfile, *Mdirs, *wfile, *ffile, *filter, *tstring, *stat_type;
-char		*byte_limit_string, *packet_limit_string, *print_format, *record_header;
-char		*print_order, *query_file, *nameserver, *aggr_fmt;
-int 		c, ffd, ret, element_stat, fdump;
-int 		i, user_format, quiet, flow_stat, topN, aggregate, aggregate_mask, bidir;
-int 		print_stat, syntax_only, date_sorted, do_tag, compress;
-int			plain_numbers, GuessDir, pipe_output, csv_output, ModifyCompress;
-time_t 		t_start, t_end;
-uint32_t	limitflows;
+char 		 *filter, *tstring, *stat_type;
+char		*byte_limit_string, *packet_limit_string, *record_header;
+char		*query_file, *nameserver;
+int 		c, ffd, ret, fdump;
+int 		i, user_format, quiet, bidir;
+int			plain_numbers, GuessDir, pipe_output, csv_output;
 char 		Ident[IDENTLEN];
+options_t   *options = calloc(1, sizeof(options_t));
 
-	rfile = Rfile = Mdirs = wfile = ffile = filter = tstring = stat_type = NULL;
+	filter = tstring = stat_type = NULL;
 	byte_limit_string = packet_limit_string = NULL;
-	fdump = aggregate = 0;
-	aggregate_mask	= 0;
+	fdump = 0;
 	bidir			= 0;
-	t_start = t_end = 0;
-	syntax_only	    = 0;
-	topN	        = -1;
-	flow_stat       = 0;
-	print_stat      = 0;
-	element_stat  	= 0;
-	limitflows		= 0;
-	date_sorted		= 0;
+	options->topN   = -1;
+	options->modify_compress = -1;
 	total_bytes		= 0;
 	total_flows		= 0;
 	skipped_blocks	= 0;
-	do_tag			= 0;
 	quiet			= 0;
 	user_format		= 0;
-	compress		= NOT_COMPRESSED;
 	plain_numbers   = 0;
 	pipe_output		= 0;
 	csv_output		= 0;
@@ -769,13 +802,8 @@ char 		Ident[IDENTLEN];
 	GuessDir		= 0;
 	nameserver		= NULL;
 
-	print_format    = NULL;
-	print_header 	= NULL;
 	print_record  	= NULL;
-	print_order  	= NULL;
 	query_file		= NULL;
-	ModifyCompress	= -1;
-	aggr_fmt		= NULL;
 	record_header 	= NULL;
 
 	Ident[0] = '\0';
@@ -787,13 +815,13 @@ char 		Ident[IDENTLEN];
 				exit(0);
 				break;
 			case 'a':
-				aggregate = 1;
+				options->aggregate = 1;
 				break;
 			case 'A':
-				if ( !ParseAggregateMask(optarg, &aggr_fmt ) ) {
+				if ( !ParseAggregateMask(optarg, &options->aggr_fmt ) ) {
 					exit(255);
 				}
-				aggregate_mask = 1;
+				options->aggregate_mask = 1;
 				break;
 			case 'B':
 				GuessDir = 1;
@@ -803,7 +831,7 @@ char 		Ident[IDENTLEN];
 				}
 				bidir	  = 1;
 				// implies
-				aggregate = 1;
+				options->aggregate = 1;
 				break;
 			case 'D':
 				nameserver = optarg;
@@ -823,42 +851,42 @@ char 		Ident[IDENTLEN];
 				fdump = 1;
 				break;
 			case 'Z':
-				syntax_only = 1;
+				options->syntax_only = 1;
 				break;
 			case 'q':
 				quiet = 1;
 				break;
 			case 'j':
-				if ( compress ) {
+				if ( options->compress ) {
 					LogError("Use one compression: -z for LZO, -j for BZ2 or -y for LZ4 compression\n");
 					exit(255);
 				}
-				compress = BZ2_COMPRESSED;
+				options->compress = BZ2_COMPRESSED;
 				break;
 			case 'y':
-				if ( compress ) {
+				if ( options->compress ) {
 					LogError("Use one compression: -z for LZO, -j for BZ2 or -y for LZ4 compression\n");
 					exit(255);
 				}
-				compress = LZ4_COMPRESSED;
+				options->compress = LZ4_COMPRESSED;
 				break;
 			case 'z':
-				if ( compress ) {
+				if ( options->compress ) {
 					LogError("Use one compression: -z for LZO, -j for BZ2 or -y for LZ4 compression\n");
 					exit(255);
 				}
-				compress = LZO_COMPRESSED;
+				options->compress = LZO_COMPRESSED;
 				break;
 			case 'c':	
-				limitflows = atoi(optarg);
-				if ( !limitflows ) {
+				options->limit_flows = atoi(optarg);
+				if ( !options->limit_flows ) {
 					LogError("Option -c needs a number > 0\n");
 					exit(255);
 				}
 				break;
 			case 's':
 				stat_type = optarg;
-                if ( !SetStat(stat_type, &element_stat, &flow_stat) ) {
+                if ( !SetStat(stat_type, &options->element_stat, &options->flow_stat) ) {
                     exit(255);
                 } 
 				break;
@@ -886,56 +914,58 @@ char 		Ident[IDENTLEN];
 				plain_numbers = 1;
 				break;
 			case 'f':
-				ffile = optarg;
+				options->ffile = strdup(optarg);
 				break;
 			case 't':
 				tstring = optarg;
 				break;
 			case 'r':
-				rfile = optarg;
-				if ( strcmp(rfile, "-") == 0 )
-					rfile = NULL;
+				options->rfile = strdup(optarg);
+				if ( strcmp(options->rfile, "-") == 0 )
+					options->rfile = NULL;
 				break;
 			case 'm':
-				print_order = "tstart";
-				Parse_PrintOrder(print_order);
-				date_sorted = 1;
+				free(options->print_order);
+				options->print_order = strdup("tstart");
+				Parse_PrintOrder(options->print_order);
+				options->date_sorted = 1;
 				LogError("Option -m deprecated. Use '-O tstart' instead\n");
 				break;
 			case 'M':
-				Mdirs = optarg;
+				options->Mdirs = optarg;
 				break;
 			case 'I':
-				print_stat++;
+				options->print_stat++;
 				break;
 			case 'o':	// output mode
-				print_format = optarg;
+				options->print_format = strdup(optarg);
 				break;
 			case 'O': {	// stat order by
 				int ret;
-				print_order = optarg;
-				ret = Parse_PrintOrder(print_order);
+				free(options->print_order);
+				options->print_order = strdup(optarg);
+				ret = Parse_PrintOrder(options->print_order);
 				if ( ret < 0 ) {
-					LogError("Unknown print order '%s'\n", print_order);
+					LogError("Unknown print order '%s'\n", options->print_order);
 					exit(255);
 				}
-				date_sorted = ret == 6;		// index into order_mode
+				options->date_sorted = ret == 6;		// index into order_mode
 				} break;
 			case 'R':
-				Rfile = optarg;
+				options->Rfile = strdup(optarg);
 				break;
 			case 'w':
-				wfile = optarg;
+				options->wfile = strdup(optarg);
 				break;
 			case 'n':
-				topN = atoi(optarg);
-				if ( topN < 0 ) {
-					LogError("TopnN number %i out of range\n", topN);
+				options->topN = atoi(optarg);
+				if ( options->topN < 0 ) {
+					LogError("TopnN number %i out of range\n", options->topN);
 					exit(255);
 				}
 				break;
 			case 'T':
-				do_tag = 1;
+				options->do_tag = 1;
 				break;
 			case 'i':
 				strncpy(Ident, optarg, IDENT_SIZE);
@@ -946,8 +976,8 @@ char 		Ident[IDENTLEN];
 				}
 				break;
 			case 'J':
-				ModifyCompress = atoi(optarg);
-				if ( (ModifyCompress < NOT_COMPRESSED) || (ModifyCompress > LZMA_COMPRESSED) ) {
+				options->modify_compress = atoi(optarg);
+				if ( (options->modify_compress < NOT_COMPRESSED) || (options->modify_compress > LZMA_COMPRESSED) ) {
 					LogError("Expected -J <num>, 0: uncompressed, 1: LZO, 2: BZ2, 3: LZ4, 4: LZMA compressed.\n");
 					exit(255);
 				}
@@ -981,39 +1011,39 @@ char 		Ident[IDENTLEN];
 	}
 	
 	// Modify compression
-	if ( ModifyCompress >= 0 ) {
-		if ( !rfile && !Rfile ) {
+	if ( options->modify_compress >= 0 ) {
+		if ( !options->rfile && !options->Rfile ) {
 			LogError("Expected -r <file> or -R <dir> to change compression\n");
 			exit(255);
 		}
-		exit(ModifyCompressFile(rfile, Rfile, ModifyCompress));
+		exit(ModifyCompressFile(options->rfile, options->Rfile, options->modify_compress));
 	}
 
 	// Change Ident only
-	if ( rfile && strlen(Ident) > 0 ) {
-		exit(ChangeIdent(rfile, Ident));
+	if ( options->rfile && strlen(Ident) > 0 ) {
+		exit(ChangeIdent(options->rfile, Ident));
 	}
 
-	if ( (element_stat || flow_stat) && (topN == -1)  ) 
-		topN = 10;
+	if ( (options->element_stat || options->flow_stat) && (options->topN == -1)  ) 
+		options->topN = 10;
 
-	if ( topN < 0 )
-		topN = 0;
+	if ( options->topN < 0 )
+		options->topN = 0;
 
-	if ( (element_stat && !flow_stat) && aggregate_mask ) {
+	if ( (options->element_stat && !options->flow_stat) && options->aggregate_mask ) {
 		LogError("Warning: Aggregation ignored for element statistics\n");
-		aggregate_mask = 0;
+		options->aggregate_mask = 0;
 	}
 
-	if ( !flow_stat && aggregate_mask ) {
-		aggregate = 1;
+	if ( !options->flow_stat && options->aggregate_mask ) {
+		options->aggregate = 1;
 	}
 
-	if ( rfile && Rfile ) {
+	if ( options->rfile && options->Rfile ) {
 		LogError("-r and -R are mutually exclusive. Please specify either -r or -R\n");
 		exit(255);
 	}
-	if ( Mdirs && !(rfile || Rfile) ) {
+	if ( options->Mdirs && !(options->rfile || options->Rfile) ) {
 		LogError("-M needs either -r or -R to specify the file or file list. Add '-R .' for all files in the directories.\n");
 		exit(255);
 	}
@@ -1023,11 +1053,11 @@ char 		Ident[IDENTLEN];
 		exit(255);
 	}
 
-	SetupInputFileSequence(Mdirs, rfile, Rfile);
+	SetupInputFileSequence(options->Mdirs, options->rfile, options->Rfile);
 
-	if ( print_stat ) {
+	if ( options->print_stat ) {
 		nffile_t *nffile;
-		if ( !rfile && !Rfile && !Mdirs) {
+		if ( !options->rfile && !options->Rfile && !options->Mdirs) {
 			LogError("Expect data file(s).\n");
 			exit(255);
 		}
@@ -1049,27 +1079,27 @@ char 		Ident[IDENTLEN];
 	}
 
 	// handle print mode
-	if ( !print_format ) {
+	if ( !options->print_format ) {
 		// automatically select an appropriate output format for custom aggregation
 		// aggr_fmt is compiled by ParseAggregateMask
-		if ( aggr_fmt ) {
-			int len = strlen(AggrPrependFmt) + strlen(aggr_fmt) + strlen(AggrAppendFmt) + 7;	// +7 for 'fmt:', 2 spaces and '\0'
-			print_format = malloc(len);
-			if ( !print_format ) {
+		if ( options->aggr_fmt ) {
+			int len = strlen(AggrPrependFmt) + strlen(options->aggr_fmt) + strlen(AggrAppendFmt) + 7;	// +7 for 'fmt:', 2 spaces and '\0'
+			options->print_format = malloc(len);
+			if ( !options->print_format ) {
 				LogError("malloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 				exit(255);
 			}
-			snprintf(print_format, len, "fmt:%s %s %s",AggrPrependFmt, aggr_fmt, AggrAppendFmt );
-			print_format[len-1] = '\0';
+			snprintf(options->print_format, len, "fmt:%s %s %s",AggrPrependFmt, options->aggr_fmt, AggrAppendFmt );
+			options->print_format[len-1] = '\0';
 		} else if ( bidir ) {
-			print_format = "biline";
+			options->print_format = strdup("biline");
 		} else
-			print_format = DefaultMode;
+			options->print_format = strdup(DefaultMode);
 	}
 
-	if ( strncasecmp(print_format, "fmt:", 4) == 0 ) {
+	if ( strncasecmp(options->print_format, "fmt:", 4) == 0 ) {
 		// special user defined output format
-		char *format = &print_format[4];
+		char *format = &options->print_format[4];
 		if ( strlen(format) ) {
 			if ( !ParseOutputFormat(format, plain_numbers, printmap) )
 				exit(255);
@@ -1084,18 +1114,18 @@ char 		Ident[IDENTLEN];
 		// predefined output format
 
 		// Check for long_v6 mode
-		i = strlen(print_format);
+		i = strlen(options->print_format);
 		if ( i > 2 ) {
-			if ( print_format[i-1] == '6' ) {
+			if ( options->print_format[i-1] == '6' ) {
 				Setv6Mode(1);
-				print_format[i-1] = '\0';
+				options->print_format[i-1] = '\0';
 			} else 
 				Setv6Mode(0);
 		}
 
 		i = 0;
 		while ( printmap[i].printmode ) {
-			if ( strncasecmp(print_format, printmap[i].printmode, MAXMODELEN) == 0 ) {
+			if ( strncasecmp(options->print_format, printmap[i].printmode, MAXMODELEN) == 0 ) {
 				if ( printmap[i].Format ) {
 					if ( !ParseOutputFormat(printmap[i].Format, plain_numbers, printmap) )
 						exit(255);
@@ -1105,10 +1135,10 @@ char 		Ident[IDENTLEN];
 					user_format	  = 1;
 				} else {
 					// To support the pipe output format for element stats - check for pipe, and remember this
-					if ( strncasecmp(print_format, "pipe", MAXMODELEN) == 0 ) {
+					if ( strncasecmp(options->print_format, "pipe", MAXMODELEN) == 0 ) {
 						pipe_output = 1;
 					}
-					if ( strncasecmp(print_format, "csv", MAXMODELEN) == 0 ) {
+					if ( strncasecmp(options->print_format, "csv", MAXMODELEN) == 0 ) {
 						csv_output = 1;
 						set_record_header();
 						record_header = get_record_header();
@@ -1124,22 +1154,18 @@ char 		Ident[IDENTLEN];
 	}
 
 	if ( !print_record ) {
-		LogError("Unknown output mode '%s'\n", print_format);
+		LogError("Unknown output mode '%s'\n", options->print_format);
 		exit(255);
 	}
 
-	// this is the only case, where headers are printed.
-	if ( strncasecmp(print_format, "raw", 16) == 0 )
-		print_header = format_file_block_header;
-	
-	if ( aggregate && (flow_stat || element_stat) ) {
-		aggregate = 0;
-		LogError("Command line switch -s overwrites -a\n");
+	if ( options->aggregate && (options->flow_stat || options->element_stat) ) {
+		options->aggregate = 0;
+		LogError("Command line switch -s overrides -a\n");
 	}
 
-	if ( !filter && ffile ) {
-		if ( stat(ffile, &stat_buff) ) {
-			LogError("Can't stat filter file '%s': %s\n", ffile, strerror(errno));
+	if ( !filter && options->ffile ) {
+		if ( stat(options->ffile, &stat_buff) ) {
+			LogError("Can't stat filter file '%s': %s\n", options->ffile, strerror(errno));
 			exit(255);
 		}
 		filter = (char *)malloc(stat_buff.st_size+1);
@@ -1147,9 +1173,9 @@ char 		Ident[IDENTLEN];
 			LogError("malloc() error in %s line %d: %s\n", __FILE__, __LINE__, strerror(errno) );
 			exit(255);
 		}
-		ffd = open(ffile, O_RDONLY);
+		ffd = open(options->ffile, O_RDONLY);
 		if ( ffd < 0 ) {
-			LogError("Can't open filter file '%s': %s\n", ffile, strerror(errno));
+			LogError("Can't open filter file '%s': %s\n", options->ffile, strerror(errno));
 			exit(255);
 		}
 		ret = read(ffd, (void *)filter, stat_buff.st_size);
@@ -1162,7 +1188,7 @@ char 		Ident[IDENTLEN];
 		filter[stat_buff.st_size] = 0;
 		close(ffd);
 
-		FilterFilename = ffile;
+		FilterFilename = options->ffile;
 	}
 
 	// if no filter is given, set the default ip filter which passes through every flow
@@ -1179,29 +1205,29 @@ char 		Ident[IDENTLEN];
 		exit(0);
 	}
 
-	if ( syntax_only )
+	if ( options->syntax_only )
 		exit(0);
 
-	if ( print_order && flow_stat ) {
+	if ( options->print_order && options->flow_stat ) {
 		printf("-s record and -O (-m) are mutually exclusive options\n");
 		exit(255);
 	}
 
-	if ((aggregate || flow_stat || print_order)  && !Init_FlowTable() )
+	if ((options->aggregate || options->flow_stat || options->print_order)  && !Init_FlowTable() )
 			exit(250);
 
-	if (element_stat && !Init_StatTable(HashBits, NumPrealloc) )
+	if (options->element_stat && !Init_StatTable(HashBits, NumPrealloc) )
 			exit(250);
 
-	SetLimits(element_stat || aggregate || flow_stat, packet_limit_string, byte_limit_string);
+	SetLimits(options->element_stat || options->aggregate || options->flow_stat, packet_limit_string, byte_limit_string);
 
 	if ( tstring ) {
-		if ( !ScanTimeFrame(tstring, &t_start, &t_end) )
+		if ( !ScanTimeFrame(tstring, &options->t_start, &options->t_end) )
 			exit(255);
 	}
 
 
-	if ( !(flow_stat || element_stat || wfile || quiet ) && record_header ) {
+	if ( !(options->flow_stat || options->element_stat || options->wfile || quiet ) && record_header ) {
 		if ( user_format ) {
 			printf("%s\n", record_header);
 		} else {
@@ -1214,9 +1240,7 @@ char 		Ident[IDENTLEN];
 	}
 
 	nfprof_start(&profile_data);
-	sum_stat = process_data(wfile, element_stat, aggregate || flow_stat, print_order != NULL,
-						print_record, t_start, t_end, 
-						limitflows, do_tag, compress);
+	sum_stat = process_data(options, print_record);
 	nfprof_end(&profile_data, total_flows);
 
 	if ( total_bytes == 0 ) {
@@ -1224,38 +1248,38 @@ char 		Ident[IDENTLEN];
 		exit(0);
 	}
 
-	if (aggregate || print_order) {
-		if ( wfile ) {
-			nffile_t *nffile = OpenNewFile(wfile, NULL, compress, is_anonymized, NULL);
+	if (options->aggregate || options->print_order) {
+		if ( options->wfile ) {
+			nffile_t *nffile = OpenNewFile(options->wfile, NULL, options->compress, is_anonymized, NULL);
 			if ( !nffile ) 
 				exit(255);
-			if ( ExportFlowTable(nffile, aggregate, bidir, date_sorted, extension_map_list) ) {
+			if ( ExportFlowTable(nffile, options->aggregate, bidir, options->date_sorted, extension_map_list) ) {
 				CloseUpdateFile(nffile, Ident );	
 			} else {
 				CloseFile(nffile);
-				unlink(wfile);
+				unlink(options->wfile);
 			}
 			DisposeFile(nffile);
 		} else {
-			PrintFlowTable(print_record, topN, do_tag, GuessDir, extension_map_list);
+			PrintFlowTable(print_record, options->topN, options->do_tag, GuessDir, extension_map_list);
 		}
 	}
 
-	if (flow_stat) {
-		PrintFlowStat(record_header, print_record, topN, do_tag, quiet, csv_output, extension_map_list);
+	if (options->flow_stat) {
+		PrintFlowStat(record_header, print_record, options->topN, options->do_tag, quiet, csv_output, extension_map_list);
 #ifdef DEVEL
 		printf("Loopcnt: %u\n", loopcnt);
 #endif
 	} 
 
-	if (element_stat) {
-		PrintElementStat(&sum_stat, plain_numbers, record_header, print_record, topN, do_tag, quiet, pipe_output, csv_output);
+	if (options->element_stat) {
+		PrintElementStat(&sum_stat, plain_numbers, record_header, print_record, options->topN, options->do_tag, quiet, pipe_output, csv_output);
 	} 
 
 	if ( !quiet ) {
 		if ( csv_output ) {
 			PrintSummary(&sum_stat, plain_numbers, csv_output);
-		} else if ( !wfile ) {
+		} else if ( !options->wfile ) {
 			if (is_anonymized)
 				printf("IP addresses anonymised\n");
 			PrintSummary(&sum_stat, plain_numbers, csv_output);
@@ -1271,6 +1295,7 @@ char 		Ident[IDENTLEN];
 		}
 	}
 
+	free_options(options);
 	Dispose_FlowTable();
 	Dispose_StatTable();
 	FreeExtensionMaps(extension_map_list);
