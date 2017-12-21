@@ -188,6 +188,7 @@ typedef struct data_block_header_s {
 	uint16_t	flags;			// 0 - compatibility
 								// 1 - block uncompressed
 								// 2 - block compressed
+	char		data[];         // address of block data
 } data_block_header_t;
 
 // compat nfdump 1.5.x data block type

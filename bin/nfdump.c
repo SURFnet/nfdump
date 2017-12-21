@@ -420,8 +420,10 @@ char *ConvertBuffer = NULL;
 	memset((void *)&stat_record, 0, sizeof(stat_record_t));
 
 #ifdef COMPAT15
+int	v1_map_done = 0;
+	
 	if ( block->id == DATA_BLOCK_TYPE_1 ) {
-		common_record_v1_t *v1_record = (common_record_v1_t *)nffile_r->buff_ptr;
+		common_record_v1_t *v1_record = (common_record_v1_t *)block->data;
 		// create an extension map for v1 blocks
 		if ( v1_map_done == 0 ) {
 			extension_map_t *map = malloc(sizeof(extension_map_t) + 2 * sizeof(uint16_t) );
@@ -445,22 +447,22 @@ char *ConvertBuffer = NULL;
 			map->extension_size += extension_descriptor[EX_IO_SNMP_2].size;
 			map->extension_size += extension_descriptor[EX_AS_2].size;
 
-			if ( Insert_Extension_Map(extension_map_list,map) && write_file ) {
+			//if ( Insert_Extension_Map(extension_map_list,map) && write_file ) {
 				// flush new map
-				AppendToBuffer(nffile_w, (void *)map, map->size);
-			} // else map already known and flushed
+			//	AppendToBuffer(nffile_w, (void *)map, map->size);
+			//} // else map already known and flushed
 
 			v1_map_done = 1;
 		}
 
 		// convert the records to v2
-		for ( i=0; i < nffile_r->block_header->NumRecords; i++ ) {
+		for ( int i=0; i < block->NumRecords; i++ ) {
 			common_record_t *v2_record = (common_record_t *)v1_record;
 			Convert_v1_to_v2((void *)v1_record);
 			// now we have a v2 record -> use size of v2_record->size
 			v1_record = (common_record_v1_t *)((pointer_addr_t)v1_record + v2_record->size);
 		}
-		nffile_r->block_header->id = DATA_BLOCK_TYPE_2;
+		block->id = DATA_BLOCK_TYPE_2;
 	}
 #endif
 
@@ -480,7 +482,7 @@ char *ConvertBuffer = NULL;
 		return stat_record;
 	}
 
-	record_ptr = (common_record_t*)block + sizeof(data_block_header_t);
+	record_ptr = (common_record_t*)block->data;
 	for ( int i=0; i < block->NumRecords; i++ ) {
 		flow_record = record_ptr;
 		switch ( record_ptr->type ) {
@@ -630,10 +632,6 @@ nffile_t			*nffile_w, *nffile_r;
 stat_record_t 		stat_record;
 int 				done, write_file;
 
-#ifdef COMPAT15
-int	v1_map_done = 0;
-#endif
-	
 	// time window of all matched flows
 	memset((void *)&stat_record, 0, sizeof(stat_record_t));
 	stat_record.first_seen = 0x7fffffff;
@@ -645,9 +643,9 @@ int	v1_map_done = 0;
 	if ( options->sort_flows || options->flow_stat || options->element_stat ) {
 		print_record = NULL;
 		// do not write flows to file, when doing any stats
+		// -w may apply for flow_stats later
 		write_file = 0;
 	} else {
-		// -w may apply for flow_stats later
 		write_file = options->wfile != NULL;
 	}
 
